@@ -5,6 +5,17 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Industrial Network — Dashboard</title>
   <link rel="stylesheet" href="style.css">
+  <style>
+    .intake-pipeline { display:grid; grid-template-columns:repeat(auto-fill,minmax(160px,1fr)); gap:1rem; margin-bottom:1rem; }
+    .pipeline-stat { background:#1e293b; border:1px solid #334155; border-radius:10px; padding:1rem 1.25rem; text-decoration:none; display:block; transition:border-color .15s; }
+    .pipeline-stat:hover { border-color:#3b82f6; }
+    .pipeline-stat .p-label { font-size:0.75rem; color:#64748b; text-transform:uppercase; letter-spacing:.05em; margin-bottom:.35rem; }
+    .pipeline-stat .p-value { font-size:1.8rem; font-weight:700; color:#f8fafc; line-height:1; }
+    .pipeline-stat .p-sub   { font-size:0.72rem; color:#475569; margin-top:.25rem; }
+    .pipeline-stat.alert .p-value { color:#f59e0b; }
+    .pipeline-stat.hot   .p-value { color:#ef4444; }
+    .pipeline-stat.good  .p-value { color:#4ade80; }
+  </style>
 </head>
 <body>
 
@@ -16,7 +27,7 @@
   <a href="products.html">Products</a>
   <a href="terms.html">Terms</a>
   <a href="portals.html">Portals</a>
-  <a href="intake-review.html">📥 Intake Review</a>
+  <a href="intake-review.html">📥 Intake Review <span id="nav-pending" style="display:none;background:#ef4444;color:#fff;font-size:0.65rem;font-weight:700;padding:0.1rem 0.4rem;border-radius:99px;margin-left:0.25rem;vertical-align:middle"></span></a>
   <span style="flex:1"></span>
   <button class="secondary" id="signout-btn" style="display:none;font-size:0.8rem;padding:0.4rem 0.9rem;align-self:center">Sign Out</button>
 </nav>
@@ -24,6 +35,43 @@
 <main>
   <h1>Dashboard</h1>
 
+  <!-- ── Intake pipeline ──────────────────────────────────────────────── -->
+  <h2 style="font-size:0.85rem;color:#64748b;text-transform:uppercase;letter-spacing:.05em;margin-bottom:.6rem">📥 Intake Pipeline</h2>
+  <div class="intake-pipeline">
+    <a class="pipeline-stat alert" href="intake-review.html">
+      <div class="p-label">Unparsed</div>
+      <div class="p-value" id="ip-unparsed">—</div>
+      <div class="p-sub">need parsing</div>
+    </a>
+    <a class="pipeline-stat alert" href="intake-review.html">
+      <div class="p-label">Awaiting Review</div>
+      <div class="p-value" id="ip-awaiting">—</div>
+      <div class="p-sub">parsed, not approved</div>
+    </a>
+    <a class="pipeline-stat" href="intake-review.html">
+      <div class="p-label">High Conflicts</div>
+      <div class="p-value" id="ip-conflicts" style="color:#ef4444">—</div>
+      <div class="p-sub">need manual review</div>
+    </a>
+    <a class="pipeline-stat good" href="intake-review.html">
+      <div class="p-label">Approved</div>
+      <div class="p-value" id="ip-approved">—</div>
+      <div class="p-sub">ready to promote</div>
+    </a>
+    <a class="pipeline-stat good" href="intake-review.html">
+      <div class="p-label">Promoted</div>
+      <div class="p-value" id="ip-promoted">—</div>
+      <div class="p-sub">all time</div>
+    </a>
+    <a class="pipeline-stat" href="intake-review.html">
+      <div class="p-label">Rejected</div>
+      <div class="p-value" id="ip-rejected" style="color:#64748b">—</div>
+      <div class="p-sub">discarded</div>
+    </a>
+  </div>
+
+  <!-- ── Master database stats ────────────────────────────────────────── -->
+  <h2 style="font-size:0.85rem;color:#64748b;text-transform:uppercase;letter-spacing:.05em;margin-bottom:.6rem">🗄 Master Database</h2>
   <div class="stat-grid" id="stats">
     <div class="stat-card"><div class="label">Entities</div><div class="value" id="s-entities">—</div></div>
     <div class="stat-card"><div class="label">Manufacturers</div><div class="value" id="s-mfr">—</div></div>
@@ -66,10 +114,11 @@ async function init() {
     await supabase.auth.signOut();
     location.reload();
   });
-  load();
+  await Promise.all([loadMaster(), loadIntakePipeline()]);
 }
 
-async function load() {
+// ── Master database stats ────────────────────────────────────────────────────
+async function loadMaster() {
   const [entities, rels, products, portals] = await Promise.all([
     supabase.from('network_entities').select('id, primary_role', { count: 'exact' }),
     supabase.from('network_relationships').select('id, considers_business, accepts_business, terms_compliant', { count: 'exact' }),
@@ -78,17 +127,17 @@ async function load() {
   ]);
 
   const eData = entities.data || [];
-  document.getElementById('s-entities').textContent = entities.count ?? 0;
-  document.getElementById('s-mfr').textContent = eData.filter(e => e.primary_role === 'manufacturer').length;
-  document.getElementById('s-dist').textContent = eData.filter(e => e.primary_role === 'distributor').length;
-  document.getElementById('s-cons').textContent = eData.filter(e => e.primary_role === 'consumer').length;
-  document.getElementById('s-rels').textContent = rels.count ?? 0;
-  document.getElementById('s-products').textContent = products.count ?? 0;
-  document.getElementById('s-portals').textContent = portals.count ?? 0;
+  document.getElementById('s-entities').textContent  = entities.count ?? 0;
+  document.getElementById('s-mfr').textContent       = eData.filter(e => e.primary_role === 'manufacturer').length;
+  document.getElementById('s-dist').textContent      = eData.filter(e => e.primary_role === 'distributor').length;
+  document.getElementById('s-cons').textContent      = eData.filter(e => e.primary_role === 'consumer').length;
+  document.getElementById('s-rels').textContent      = rels.count ?? 0;
+  document.getElementById('s-products').textContent  = products.count ?? 0;
+  document.getElementById('s-portals').textContent   = portals.count ?? 0;
 
   const rData = rels.data || [];
   document.getElementById('f-considers').textContent = rData.filter(r => r.considers_business).length;
-  document.getElementById('f-accepts').textContent = rData.filter(r => r.accepts_business).length;
+  document.getElementById('f-accepts').textContent   = rData.filter(r => r.accepts_business).length;
   document.getElementById('f-compliant').textContent = rData.filter(r => r.terms_compliant).length;
   document.getElementById('s-compliant').textContent = rData.filter(r => r.terms_compliant).length;
 
@@ -101,12 +150,57 @@ async function load() {
     const name = r.domains?.name || r.domain_id;
     counts[name] = (counts[name] || 0) + 1;
   });
-
   const tbody = document.getElementById('industry-rows');
-  const rows = Object.entries(counts);
+  const rows  = Object.entries(counts);
   tbody.innerHTML = rows.length
     ? rows.map(([name, n]) => `<tr><td>${name}</td><td>${n}</td></tr>`).join('')
     : '<tr><td colspan="2">No industry assignments yet</td></tr>';
+}
+
+// ── Intake pipeline stats ────────────────────────────────────────────────────
+async function loadIntakePipeline() {
+  const [unparsed, stages, highConflict] = await Promise.all([
+    // Unparsed = submissions with no intake_parsed_id and not rejected
+    supabase.from('submissions')
+      .select('id', { count: 'exact', head: true })
+      .is('intake_parsed_id', null)
+      .neq('status', 'rejected'),
+
+    // All intake_parsed records — count by stage
+    supabase.from('intake_parsed')
+      .select('stage, conflict_severity'),
+
+    // High-conflict parsed records not yet promoted/rejected
+    supabase.from('intake_parsed')
+      .select('id', { count: 'exact', head: true })
+      .eq('conflict_severity', 'high')
+      .in('stage', ['parsing', 'awaiting_review', 'approved'])
+  ]);
+
+  const unparsedCount = unparsed.count ?? 0;
+  const stageData     = stages.data || [];
+
+  const byStage = (s) => stageData.filter(r => r.stage === s).length;
+  const awaitingCount  = byStage('awaiting_review');
+  const approvedCount  = byStage('approved');
+  const promotedCount  = byStage('promoted');
+  const rejectedCount  = byStage('rejected');
+  const conflictCount  = highConflict.count ?? 0;
+
+  document.getElementById('ip-unparsed').textContent  = unparsedCount;
+  document.getElementById('ip-awaiting').textContent  = awaitingCount;
+  document.getElementById('ip-conflicts').textContent = conflictCount;
+  document.getElementById('ip-approved').textContent  = approvedCount;
+  document.getElementById('ip-promoted').textContent  = promotedCount;
+  document.getElementById('ip-rejected').textContent  = rejectedCount;
+
+  // Nav badge — show total needing action
+  const actionable = unparsedCount + awaitingCount;
+  if (actionable > 0) {
+    const badge = document.getElementById('nav-pending');
+    badge.textContent = actionable;
+    badge.style.display = 'inline';
+  }
 }
 
 init();
