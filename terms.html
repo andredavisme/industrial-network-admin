@@ -43,6 +43,7 @@
       <button type="submit">Add Term</button>
       <div class="msg" id="terms-msg"></div>
     </form>
+    <div id="expo-terms"></div>
   </div>
 
   <div class="card">
@@ -58,67 +59,59 @@
 
 <script type="module">
 import { supabase, requireAuth } from './supabase.js';
+import { mountExpoPanel } from './submit-expository.js';
 
 async function init() {
   await requireAuth();
-  document.getElementById('signout-btn').style.display = 'flex';
-  document.getElementById('signout-btn').addEventListener('click', async () => {
-    await supabase.auth.signOut();
-    location.reload();
-  });
+  document.getElementById('signout-btn').style.display='flex';
+  document.getElementById('signout-btn').addEventListener('click', async () => { await supabase.auth.signOut(); location.reload(); });
+  mountExpoPanel({ containerId: 'expo-terms', targetTable: 'network_terms', supabase });
   loadSelects(); loadTerms();
 }
 
 async function loadSelects() {
   const { data: entities } = await supabase.from('network_entities').select('id, legal_name').order('legal_name');
   document.getElementById('term-entity_id').innerHTML = '<option value="">Select entity…</option>' + (entities||[]).map(e=>`<option value="${e.id}">${e.legal_name}</option>`).join('');
-
-  const { data: rels } = await supabase
-    .from('network_relationships')
+  const { data: rels } = await supabase.from('network_relationships')
     .select('id, rel_type, from_entity:from_entity_id(legal_name), to_entity:to_entity_id(legal_name)');
   document.getElementById('term-rel_id').innerHTML = '<option value="">General (no specific relationship)</option>' +
     (rels||[]).map(r=>`<option value="${r.id}">${r.from_entity?.legal_name} → ${r.to_entity?.legal_name} (${r.rel_type.replace(/_/g,' ')})</option>`).join('');
 }
 
 async function loadTerms() {
-  const { data } = await supabase
-    .from('network_terms')
+  const { data } = await supabase.from('network_terms')
     .select('id, title, is_active, entity:entity_id(legal_name)')
     .order('created_at', { ascending: false });
-
   const tbody = document.getElementById('terms-list');
-  if (!data?.length) { tbody.innerHTML = '<tr><td colspan="4">No terms yet</td></tr>'; return; }
-  tbody.innerHTML = data.map(t => `<tr>
+  if (!data?.length) { tbody.innerHTML='<tr><td colspan="4">No terms yet</td></tr>'; return; }
+  tbody.innerHTML = data.map(t=>`<tr>
     <td>${t.title}</td>
-    <td>${t.entity?.legal_name || '—'}</td>
-    <td>${t.is_active ? '✅' : '⬜'}</td>
+    <td>${t.entity?.legal_name||'—'}</td>
+    <td>${t.is_active?'✅':'⬜'}</td>
     <td><button class="secondary" onclick="deleteTerm('${t.id}')">Delete</button></td>
   </tr>`).join('');
 }
 
 window.deleteTerm = async (id) => {
   if (!confirm('Delete this term?')) return;
-  await supabase.from('network_terms').delete().eq('id', id);
+  await supabase.from('network_terms').delete().eq('id',id);
   loadTerms();
 };
 
 document.getElementById('terms-form').addEventListener('submit', async e => {
   e.preventDefault();
   const msg = document.getElementById('terms-msg');
-  msg.className = 'msg';
-
+  msg.className='msg';
   const payload = {
     entity_id: document.getElementById('term-entity_id').value,
-    rel_id: document.getElementById('term-rel_id').value || null,
+    rel_id: document.getElementById('term-rel_id').value||null,
     title: document.getElementById('term-title').value.trim(),
     body: document.getElementById('term-body').value.trim()
   };
-
   const { error } = await supabase.from('network_terms').insert(payload);
-  if (error) { msg.className = 'msg error'; msg.textContent = error.message; return; }
-  msg.className = 'msg success'; msg.textContent = 'Term added!';
-  e.target.reset();
-  loadTerms();
+  if (error) { msg.className='msg error'; msg.textContent=error.message; return; }
+  msg.className='msg success'; msg.textContent='Term added!';
+  e.target.reset(); loadTerms();
 });
 
 init();

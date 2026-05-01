@@ -68,6 +68,7 @@
       <button type="submit">Add Entity</button>
       <div class="msg" id="form-msg"></div>
     </form>
+    <div id="expo-entities"></div>
   </div>
 
   <div class="card">
@@ -83,48 +84,44 @@
 
 <script type="module">
 import { supabase, requireAuth } from './supabase.js';
+import { mountExpoPanel } from './submit-expository.js';
 
 const ROLE_BADGE = { manufacturer: 'badge-blue', distributor: 'badge-amber', consumer: 'badge-green', user_org: 'badge-purple' };
-
-let domains = [];
 
 async function init() {
   await requireAuth();
   document.getElementById('signout-btn').style.display = 'flex';
   document.getElementById('signout-btn').addEventListener('click', async () => {
-    await supabase.auth.signOut();
-    location.reload();
+    await supabase.auth.signOut(); location.reload();
   });
+  mountExpoPanel({ containerId: 'expo-entities', targetTable: 'network_entities', supabase });
   loadDomains();
   loadEntities();
 }
 
 async function loadDomains() {
   const { data } = await supabase.from('domains').select('id, name, parent_id').not('parent_id', 'is', null).order('sort_order');
-  domains = data || [];
   const sel = document.getElementById('industry_ids');
-  sel.innerHTML = domains.map(d => `<option value="${d.id}">${d.name}</option>`).join('');
+  sel.innerHTML = (data||[]).map(d => `<option value="${d.id}">${d.name}</option>`).join('');
 }
 
 async function loadEntities() {
   const { data } = await supabase
     .from('network_entities')
-    .select('id, legal_name, trade_name, primary_role, status, level1_id, network_entity_industries(domain_id, domains(name))')
+    .select('id, legal_name, trade_name, primary_role, status, network_entity_industries(domain_id, domains(name))')
     .order('legal_name');
-
   const tbody = document.getElementById('entity-list');
   if (!data?.length) { tbody.innerHTML = '<tr><td colspan="6">No entities yet</td></tr>'; return; }
-
   tbody.innerHTML = data.map(e => {
-    const industries = (e.network_entity_industries || []).map(i => i.domains?.name).filter(Boolean).join(', ') || '—';
-    const badge = ROLE_BADGE[e.primary_role] || 'badge-gray';
+    const industries = (e.network_entity_industries||[]).map(i=>i.domains?.name).filter(Boolean).join(', ')||'—';
+    const badge = ROLE_BADGE[e.primary_role]||'badge-gray';
     return `<tr>
-      <td><strong>${e.legal_name}</strong>${e.trade_name ? `<br><small style="color:#64748b">${e.trade_name}</small>` : ''}</td>
+      <td><strong>${e.legal_name}</strong>${e.trade_name?`<br><small style="color:#64748b">${e.trade_name}</small>`:''}</td>
       <td><span class="badge ${badge}">${e.primary_role}</span></td>
       <td>${industries}</td>
       <td><span class="badge badge-gray">${e.status}</span></td>
       <td>—</td>
-      <td class="actions"><button class="secondary" onclick="deleteEntity('${e.id}')">Delete</button></td>
+      <td><button class="secondary" onclick="deleteEntity('${e.id}')">Delete</button></td>
     </tr>`;
   }).join('');
 }
@@ -139,37 +136,31 @@ document.getElementById('entity-form').addEventListener('submit', async e => {
   e.preventDefault();
   const msg = document.getElementById('form-msg');
   msg.className = 'msg';
-
-  const selectedIndustries = [...document.getElementById('industry_ids').selectedOptions].map(o => o.value);
-
+  const selectedIndustries = [...document.getElementById('industry_ids').selectedOptions].map(o=>o.value);
   const payload = {
     legal_name: document.getElementById('legal_name').value.trim(),
-    trade_name: document.getElementById('trade_name').value.trim() || null,
+    trade_name: document.getElementById('trade_name').value.trim()||null,
     slug: document.getElementById('slug').value.trim(),
     primary_role: document.getElementById('primary_role').value,
-    email: document.getElementById('email').value.trim() || null,
-    phone: document.getElementById('phone').value.trim() || null,
-    website_url: document.getElementById('website_url').value.trim() || null,
-    notes: document.getElementById('notes').value.trim() || null,
+    email: document.getElementById('email').value.trim()||null,
+    phone: document.getElementById('phone').value.trim()||null,
+    website_url: document.getElementById('website_url').value.trim()||null,
+    notes: document.getElementById('notes').value.trim()||null,
     status: 'published'
   };
-
   const { data, error } = await supabase.from('network_entities').insert(payload).select('id').single();
-  if (error) { msg.className = 'msg error'; msg.textContent = error.message; return; }
-
+  if (error) { msg.className='msg error'; msg.textContent=error.message; return; }
   if (selectedIndustries.length && data?.id) {
     await supabase.from('network_entity_industries').insert(
-      selectedIndustries.map((domain_id, i) => ({ entity_id: data.id, domain_id, is_primary: i === 0 }))
+      selectedIndustries.map((domain_id,i)=>({ entity_id: data.id, domain_id, is_primary: i===0 }))
     );
   }
-
-  msg.className = 'msg success'; msg.textContent = 'Entity added!';
-  e.target.reset();
-  loadEntities();
+  msg.className='msg success'; msg.textContent='Entity added!';
+  e.target.reset(); loadEntities();
 });
 
 document.getElementById('legal_name').addEventListener('input', e => {
-  document.getElementById('slug').value = e.target.value.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+  document.getElementById('slug').value = e.target.value.toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'');
 });
 
 init();
