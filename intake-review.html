@@ -47,10 +47,26 @@
     .parse-form-field .hint { font-size:0.68rem; color:#475569; }
     .parse-form-field.full-width { grid-column:1/-1; }
 
+    /* ── Auto-parse progress banner ────────────────────────── */
+    .auto-parse-banner {
+      background:#0f172a; border:1px solid #334155; border-radius:8px;
+      padding:0.75rem 1rem; margin-bottom:1rem;
+      font-size:0.82rem; color:#94a3b8;
+      display:flex; align-items:center; gap:0.75rem;
+    }
+    .auto-parse-banner .spinner {
+      width:14px; height:14px; border:2px solid #334155;
+      border-top-color:#3b82f6; border-radius:50%;
+      animation:spin 0.7s linear infinite; flex-shrink:0;
+    }
+    @keyframes spin { to { transform:rotate(360deg); } }
+    .auto-parse-banner.done { border-color:#166534; color:#4ade80; }
+    .auto-parse-banner.done .spinner { display:none; }
+
     /* ── Conflicts ──────────────────────────────────────────── */
     .conflict-item { background:#1c0a0a; border:1px solid #7f1d1d; border-radius:6px; padding:0.5rem 0.75rem; font-size:0.8rem; color:#fca5a5; margin-bottom:0.4rem; }
 
-    /* ── Action row (approve/reject/promote) ─────────────────── */
+    /* ── Action row ─────────────────────────────────────────── */
     .action-row { display:flex; gap:0.5rem; align-items:center; flex-wrap:wrap; margin-top:0.75rem; padding-top:0.75rem; border-top:1px solid #334155; }
     .action-row textarea { flex:1; min-width:200px; min-height:2.5rem; font-size:0.8rem; padding:0.4rem 0.6rem; }
     .btn-approve { background:#166534; } .btn-approve:hover { background:#15803d; }
@@ -99,10 +115,10 @@
     <div style="font-size:0.85rem;color:#94a3b8;line-height:1.7">
       <strong style="color:#e2e8f0">Agent workflow:</strong>
       <ol style="margin:0.4rem 0 0 1.2rem;display:flex;flex-direction:column;gap:0.2rem">
-        <li>Read the raw submission text.</li>
-        <li>Fill in the structured parse form — extract what you can; leave unknowns blank.</li>
-        <li>Click <strong>Create Parsed Record</strong> — conflicts are auto-checked at this point.</li>
-        <li>Review conflicts, correct any fields, add notes, then <strong>Approve</strong>.</li>
+        <li>New submissions are auto-parsed on load — structured template submissions arrive pre-filled.</li>
+        <li>Review the extracted fields; edit anything that looks wrong.</li>
+        <li>For unparsed submissions, fill the structured form and click <strong>Create Parsed Record</strong>.</li>
+        <li>Review conflicts, correct fields, add notes, then <strong>Approve</strong>.</li>
         <li>Click <strong>Promote to Master</strong> to write the verified record to the canonical database.</li>
       </ol>
     </div>
@@ -120,6 +136,7 @@
 
   <div class="card">
     <h2>📥 Unparsed Submissions</h2>
+    <div id="auto-parse-status"></div>
     <div id="unparsed-list"><div class="empty-state">Loading…</div></div>
   </div>
 
@@ -143,14 +160,10 @@
 import { supabase, requireAuth } from './supabase.js';
 import { promoteToMaster, detectConflicts } from './promote.js';
 
+const EDGE_FN_URL = 'https://nmemmfblpzrkwyljpmvp.supabase.co/functions/v1/auto-parse-submission';
+
 // ════════════════════════════════════════════════════════════════════
 // PARSE FORM SCHEMAS
-// Each entry maps a target_table name to an ordered list of field
-// descriptors the agent fills in. Fields are rendered as labelled
-// inputs in a responsive grid — no JSON typing required.
-//
-// Field types: text | textarea | select | email | url | tel | number | checkbox
-// 'required' = agent must fill before saving; 'hint' = helper text shown beneath
 // ════════════════════════════════════════════════════════════════════
 const PARSE_SCHEMAS = {
   network_entities: [
@@ -187,20 +200,17 @@ const PARSE_SCHEMAS = {
   ],
 };
 
-// Fallback: generic key→value pairs for tables without a specific schema
 const GENERIC_SCHEMA_NOTE = 'No structured schema defined for this table. Enter field names and values below.';
 
-// ── Slugify helper ──────────────────────────────────────────────────
+// ── Slugify helper ───────────────────────────────────────────────────
 function slugify(s) {
   return s.toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'');
 }
 
-// ── Render a parse form for a given target_table ────────────────────
-// Returns an HTML string for a form with inputs keyed as `pf-{subId}-{field.key}`
-function renderParseForm(subId, targetTable) {
+// ── Render parse form ────────────────────────────────────────────────
+function renderParseForm(subId, targetTable, prefill = {}) {
   const schema = PARSE_SCHEMAS[targetTable];
   if (!schema) {
-    // Generic fallback: three free-form key/value pair rows
     return `
       <div style="font-size:0.8rem;color:#f59e0b;margin-bottom:0.5rem">⚠ ${GENERIC_SCHEMA_NOTE}</div>
       <div id="generic-pairs-${subId}"></div>
@@ -210,19 +220,22 @@ function renderParseForm(subId, targetTable) {
   }
 
   const fields = schema.map(f => {
-    const id = `pf-${subId}-${f.key}`;
+    const id  = `pf-${subId}-${f.key}`;
     const req = f.required ? '<span style="color:#ef4444">*</span>' : '';
     const wideClass = f.wide ? 'parse-form-field full-width' : 'parse-form-field';
+    const pre = escHtml(String(prefill[f.key] ?? ''));
     let input = '';
     if (f.type === 'textarea') {
-      input = `<textarea id="${id}" placeholder="—"></textarea>`;
+      input = `<textarea id="${id}" placeholder="—">${pre}</textarea>`;
     } else if (f.type === 'select') {
-      const opts = (f.options||[]).map(o => `<option value="${o}">${o||'Select…'}</option>`).join('');
+      const opts = (f.options||[]).map(o =>
+        `<option value="${o}"${o === (prefill[f.key]??'') ? ' selected' : ''}>${o||'Select…'}</option>`
+      ).join('');
       input = `<select id="${id}">${opts}</select>`;
     } else if (f.type === 'checkbox') {
-      input = `<input type="checkbox" id="${id}" style="width:auto">` ;
+      input = `<input type="checkbox" id="${id}" style="width:auto" ${prefill[f.key] ? 'checked' : ''}>`;
     } else {
-      input = `<input type="${f.type}" id="${id}" placeholder="—">`;
+      input = `<input type="${f.type}" id="${id}" placeholder="—" value="${pre}">`;
     }
     const hint = f.hint ? `<span class="hint">${f.hint}</span>` : '';
     return `<div class="${wideClass}"><label for="${id}">${f.label} ${req}</label>${input}${hint}</div>`;
@@ -231,14 +244,12 @@ function renderParseForm(subId, targetTable) {
   return `<div class="parse-form-grid">${fields}</div>`;
 }
 
-// ── Collect values from a rendered parse form ───────────────────────
+// ── Collect form values ──────────────────────────────────────────────
 function collectParseForm(subId, targetTable) {
   const schema = PARSE_SCHEMAS[targetTable];
   const result = {};
   if (!schema) {
-    // Collect generic pairs
-    const rows = document.querySelectorAll(`[data-generic-pair="${subId}"]`);
-    rows.forEach(row => {
+    document.querySelectorAll(`[data-generic-pair="${subId}"]`).forEach(row => {
       const k = row.querySelector('.gp-key').value.trim();
       const v = row.querySelector('.gp-val').value.trim();
       if (k) result[k] = v;
@@ -249,19 +260,14 @@ function collectParseForm(subId, targetTable) {
     const el = document.getElementById(`pf-${subId}-${f.key}`);
     if (!el) return;
     if (f.type === 'checkbox') { result[f.key] = el.checked; }
-    else {
-      const v = el.value.trim();
-      if (v) result[f.key] = v;
-    }
+    else { const v = el.value.trim(); if (v) result[f.key] = v; }
   });
-  // Auto-slug from legal_name for network_entities if slug is empty
   if (targetTable === 'network_entities' && !result.slug && result.legal_name) {
     result.slug = slugify(result.legal_name);
   }
   return result;
 }
 
-// ── Add a generic key/value pair row ───────────────────────────────
 window.addGenericPair = (subId) => {
   const container = document.getElementById(`generic-pairs-${subId}`);
   if (!container) return;
@@ -277,33 +283,69 @@ window.addGenericPair = (subId) => {
 };
 
 // ════════════════════════════════════════════════════════════════════
-// INIT
+// AUTO-PARSE via Edge Function
+// Fires for every submission that has no intake_parsed_id.
+// Runs up to MAX_CONCURRENT at a time to avoid hammering the function.
+// After all complete, reloads both lists.
 // ════════════════════════════════════════════════════════════════════
-let activeStage = '';
+const MAX_CONCURRENT = 5;
 
-async function init() {
-  await requireAuth();
-  document.getElementById('signout-btn').style.display = 'flex';
-  document.getElementById('signout-btn').addEventListener('click', async () => {
-    await supabase.auth.signOut(); location.reload();
-  });
-  document.getElementById('stage-filter').addEventListener('click', e => {
-    const btn = e.target.closest('[data-stage]');
-    if (!btn) return;
-    document.querySelectorAll('#stage-filter button').forEach(b => b.classList.remove('active'));
-    btn.classList.add('active');
-    activeStage = btn.dataset.stage;
-    loadParsed();
-  });
-  loadUnparsed();
+async function autoParseAll(subs) {
+  if (!subs.length) return;
+
+  const statusEl = document.getElementById('auto-parse-status');
+  const total = subs.length;
+  let done = 0;
+
+  const showProgress = () => {
+    statusEl.innerHTML = `
+      <div class="auto-parse-banner${done >= total ? ' done' : ''}">
+        ${done < total ? '<div class="spinner"></div>' : '✅'}
+        <span>${done < total
+          ? `Auto-parsing ${done}/${total} submissions…`
+          : `Auto-parsed ${total} submission${total===1?'':'s'}. Refreshing…`
+        }</span>
+      </div>`;
+  };
+
+  showProgress();
+
+  // Retrieve the session token to pass as Authorization header
+  const { data: { session } } = await supabase.auth.getSession();
+  const token = session?.access_token ?? '';
+
+  // Process in chunks of MAX_CONCURRENT
+  for (let i = 0; i < subs.length; i += MAX_CONCURRENT) {
+    const chunk = subs.slice(i, i + MAX_CONCURRENT);
+    await Promise.all(chunk.map(async (s) => {
+      try {
+        await fetch(EDGE_FN_URL, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`,
+          },
+          body: JSON.stringify({ submission_id: s.id }),
+        });
+      } catch (err) {
+        console.warn('Auto-parse failed for', s.id, err);
+      }
+      done++;
+      showProgress();
+    }));
+  }
+
+  // Small delay so the "done" banner is visible, then reload both panels
+  await new Promise(r => setTimeout(r, 800));
+  statusEl.innerHTML = '';
+  loadUnparsed(false);   // false = don't re-trigger auto-parse
   loadParsed();
-  loadPromoteLog();
 }
 
 // ════════════════════════════════════════════════════════════════════
 // UNPARSED SUBMISSIONS
 // ════════════════════════════════════════════════════════════════════
-async function loadUnparsed() {
+async function loadUnparsed(triggerAutoParse = true) {
   const { data: subs } = await supabase
     .from('submissions')
     .select('id, created_at, target_table, description, submitter_name, submitter_email, status, has_files')
@@ -313,7 +355,19 @@ async function loadUnparsed() {
     .limit(50);
 
   const el = document.getElementById('unparsed-list');
-  if (!subs?.length) { el.innerHTML = '<div class="empty-state">No unparsed submissions.</div>'; return; }
+
+  // Fire auto-parse for all unparsed submissions on first load
+  if (triggerAutoParse && subs?.length) {
+    await autoParseAll(subs);
+    return; // autoParseAll calls loadUnparsed(false) when done
+  }
+
+  if (!subs?.length) {
+    el.innerHTML = '<div class="empty-state">No unparsed submissions. 🎉</div>';
+    document.getElementById('pending-count').textContent = '';
+    return;
+  }
+
   document.getElementById('pending-count').textContent = subs.length + ' pending';
 
   el.innerHTML = subs.map(s => `
@@ -330,7 +384,7 @@ async function loadUnparsed() {
       <div class="raw-text">${escHtml(s.description || '(no description)')}</div>
 
       <details class="parsed-detail">
-        <summary>▶ Parse this submission — fill in the structured form</summary>
+        <summary>▶ Parse manually — fill in the structured form</summary>
         <div class="parse-panel">
           <h4>Extract structured fields for <em>${s.target_table}</em></h4>
           ${renderParseForm(s.id, s.target_table)}
@@ -350,10 +404,8 @@ window.beginParse = async (subId, targetTable) => {
   const msgEl = document.getElementById(`parse-msg-${subId}`);
   msgEl.className = 'msg';
   const agent = document.getElementById(`agent-${subId}`).value.trim() || 'agent';
-
   const parsed_fields = collectParseForm(subId, targetTable);
 
-  // Validate required fields
   const schema = PARSE_SCHEMAS[targetTable];
   if (schema) {
     const missing = schema.filter(f => f.required && !parsed_fields[f.key]);
@@ -386,14 +438,13 @@ window.beginParse = async (subId, targetTable) => {
     .eq('id', subId);
 
   if (conflicts.length > 0) {
-    msgEl.className = 'msg';
-    msgEl.style.color = '#f59e0b';
+    msgEl.className = 'msg'; msgEl.style.color = '#f59e0b';
     msgEl.textContent = `⚠ Parsed with ${conflicts.length} conflict(s). Scroll to Parsed Records to review.`;
   } else {
     msgEl.className = 'msg success';
     msgEl.textContent = '✅ Parsed. No conflicts. Scroll down to approve and promote.';
   }
-  setTimeout(() => { loadUnparsed(); loadParsed(); }, 1000);
+  setTimeout(() => { loadUnparsed(false); loadParsed(); }, 1000);
 };
 
 // ════════════════════════════════════════════════════════════════════
@@ -409,7 +460,7 @@ async function loadParsed() {
   const { data: rows } = await q;
   const el = document.getElementById('parsed-list');
   if (!rows?.length) {
-    el.innerHTML = `<div class="empty-state">No parsed records${activeStage ? ` in stage “${activeStage}”` : ''}.</div>`;
+    el.innerHTML = `<div class="empty-state">No parsed records${activeStage ? ` in stage "${activeStage}"` : ''}.</div>`;
     return;
   }
 
@@ -424,7 +475,6 @@ async function loadParsed() {
         ).join('')
       : '<div style="font-size:0.8rem;color:#4ade80">✓ No conflicts detected</div>';
 
-    // Editable parsed_fields rendered as proper inputs per schema
     const schema = PARSE_SCHEMAS[r.target_table];
     let fieldsHtml;
     if (schema) {
@@ -443,13 +493,20 @@ async function loadParsed() {
         return `<div class="parsed-field"><label>${f.label}</label>${input}</div>`;
       }).join('') + `</div>`;
     } else {
-      // Fallback: simple key→value display
       fieldsHtml = `<div class="parsed-grid">` +
         Object.entries(r.parsed_fields||{}).map(([k,v]) =>
           `<div class="parsed-field"><label>${escHtml(k)}</label>
            <input value="${escHtml(String(v))}" data-ip="${r.id}" data-field="${k}" onchange="patchField(this)"></div>`
         ).join('') + `</div>`;
     }
+
+    // auto-parse confidence badge
+    const isAuto = String(r.parsed_by||'').startsWith('auto:');
+    const confidenceTag = isAuto
+      ? (r.agent_notes?.includes('structured template')
+          ? '<span class="badge badge-green" style="font-size:0.7rem">🤖 template-parsed</span>'
+          : '<span class="badge badge-amber" style="font-size:0.7rem">🤖 heuristic-parsed</span>')
+      : '';
 
     const canApprove = ['parsing','awaiting_review'].includes(r.stage);
     const canPromote = r.stage === 'approved';
@@ -463,6 +520,7 @@ async function loadParsed() {
           <span class="badge badge-${r.conflict_severity==='none'?'green':r.conflict_severity==='high'?'red':'amber'}">
             ${r.conflict_severity} conflict
           </span>
+          ${confidenceTag}
           <span>by ${escHtml(r.parsed_by||'—')}</span>
           <span>${new Date(r.created_at).toLocaleString()}</span>
         </div>
@@ -488,7 +546,7 @@ async function loadParsed() {
   }).join('');
 }
 
-// ── Patch a single field on intake_parsed ────────────────────────────
+// ── Patch a single parsed_fields key ────────────────────────────────
 window.patchField = async (input) => {
   const ipId  = input.dataset.ip;
   const field = input.dataset.field;
@@ -511,7 +569,7 @@ window.approveRecord = async (ipId) => {
   setTimeout(loadParsed, 600);
 };
 
-// ── Reject ───────────────────────────────────────────────────────────
+// ── Reject ────────────────────────────────────────────────────────────
 window.rejectRecord = async (ipId) => {
   const reviewer = document.getElementById(`reviewer-${ipId}`).value.trim() || 'agent';
   const notes    = document.getElementById(`note-${ipId}`).value.trim() || null;
@@ -527,7 +585,7 @@ window.rejectRecord = async (ipId) => {
   setTimeout(loadParsed, 600);
 };
 
-// ── Promote to Master ────────────────────────────────────────────────
+// ── Promote to Master ─────────────────────────────────────────────────
 window.promoteRecord = async (ipId) => {
   const reviewer = document.getElementById(`reviewer-${ipId}`).value.trim() || 'agent';
   const notes    = document.getElementById(`note-${ipId}`).value.trim() || null;
@@ -565,9 +623,33 @@ async function loadPromoteLog() {
   `).join('');
 }
 
-// ── HTML escape helper ────────────────────────────────────────────────
+// ── HTML escape ───────────────────────────────────────────────────────
 function escHtml(s) {
   return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+// ════════════════════════════════════════════════════════════════════
+// INIT
+// ════════════════════════════════════════════════════════════════════
+let activeStage = '';
+
+async function init() {
+  await requireAuth();
+  document.getElementById('signout-btn').style.display = 'flex';
+  document.getElementById('signout-btn').addEventListener('click', async () => {
+    await supabase.auth.signOut(); location.reload();
+  });
+  document.getElementById('stage-filter').addEventListener('click', e => {
+    const btn = e.target.closest('[data-stage]');
+    if (!btn) return;
+    document.querySelectorAll('#stage-filter button').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    activeStage = btn.dataset.stage;
+    loadParsed();
+  });
+  loadUnparsed();   // triggers auto-parse on first load
+  loadParsed();
+  loadPromoteLog();
 }
 
 init();
