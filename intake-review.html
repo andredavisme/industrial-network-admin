@@ -455,8 +455,9 @@ window.beginParse = async (subId, targetTable) => {
 // PARSED RECORDS
 // ════════════════════════════════════════════════════════════════════
 async function loadParsed() {
+  // original_text lives directly on intake_parsed — no join needed
   let q = supabase.from('intake_parsed')
-    .select('id, created_at, submission_id, target_table, parsed_fields, conflicts, conflict_severity, stage, parsed_by, reviewed_by, agent_notes, operator_notes, source_url, submissions(description)')
+    .select('id, created_at, submission_id, target_table, parsed_fields, conflicts, conflict_severity, stage, parsed_by, reviewed_by, agent_notes, operator_notes, original_text, source_url')
     .order('created_at', { ascending: false })
     .limit(100);
   if (activeStage) q = q.eq('stage', activeStage);
@@ -504,13 +505,12 @@ async function loadParsed() {
         ).join('') + `</div>`;
     }
 
-    // original text collapsible (pulled from linked submission)
-    const originalText = r.submissions?.description || null;
+    // original text collapsible — reads from intake_parsed.original_text directly
     const originalTextHtml = `
       <details class="parsed-detail" style="margin-bottom:0.75rem">
         <summary>📄 Original submission text</summary>
         <div class="raw-text" style="margin-top:0.5rem;margin-bottom:0">${
-          originalText ? escHtml(originalText) : '<em style="color:#475569">No original text available.</em>'
+          r.original_text ? escHtml(r.original_text) : '<em style="color:#475569">No original text available.</em>'
         }</div>
       </details>`;
 
