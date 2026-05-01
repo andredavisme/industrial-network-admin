@@ -32,6 +32,8 @@
     .parsed-field input, .parsed-field select, .parsed-field textarea { font-size:0.85rem; padding:0.3rem 0.5rem; background:transparent; border:none; border-bottom:1px solid #334155; border-radius:0; color:#e2e8f0; width:100%; }
     .parsed-field input:focus, .parsed-field select:focus, .parsed-field textarea:focus { border-bottom-color:#3b82f6; outline:none; }
     .parsed-field textarea { min-height:56px; resize:vertical; }
+    .parsed-field input.field-error { border-bottom-color:#ef4444 !important; }
+    .parsed-field .field-error-msg { font-size:0.68rem; color:#ef4444; margin-top:0.2rem; }
 
     /* ── Parse panel (structured form inside unparsed cards) ── */
     .parse-panel { border-top:1px solid #334155; margin-top:0.75rem; padding-top:0.75rem; }
@@ -43,6 +45,7 @@
     .parse-form-field select,
     .parse-form-field textarea { background:#0f172a; border:1px solid #334155; border-radius:5px; color:#e2e8f0; padding:0.35rem 0.5rem; font-size:0.82rem; width:100%; }
     .parse-form-field input:focus, .parse-form-field select:focus, .parse-form-field textarea:focus { border-color:#3b82f6; outline:none; }
+    .parse-form-field input.field-error { border-color:#ef4444 !important; }
     .parse-form-field textarea { min-height:60px; resize:vertical; }
     .parse-form-field .hint { font-size:0.68rem; color:#475569; }
     .parse-form-field.full-width { grid-column:1/-1; }
@@ -174,19 +177,65 @@ import { promoteToMaster, detectConflicts } from './promote.js';
 const EDGE_FN_URL = 'https://nmemmfblpzrkwyljpmvp.supabase.co/functions/v1/auto-parse-submission';
 
 // ════════════════════════════════════════════════════════════════════
+// DATA FORMATTING & VALIDATION HELPERS
+// ════════════════════════════════════════════════════════════════════
+
+/**
+ * Format a raw phone string to (xxx) xxx-xxxx.
+ * Strips all non-digits, then formats the last 10 digits.
+ * Returns original string if fewer than 10 digits remain.
+ */
+function formatPhone(raw) {
+  const digits = raw.replace(/\D/g, '');
+  if (digits.length < 10) return raw;
+  const local = digits.slice(-10);
+  return `(${local.slice(0,3)}) ${local.slice(3,6)}-${local.slice(6)}`;
+}
+
+/** Basic RFC-5322-ish email check — requires local@domain.tld */
+function isValidEmail(val) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(val.trim());
+}
+
+/** Attach phone-formatting blur handler to an <input> element */
+function attachPhoneBlur(input) {
+  input.addEventListener('blur', () => {
+    if (!input.value.trim()) return;
+    input.value = formatPhone(input.value);
+  });
+}
+
+/** Attach email validation blur handler to an <input> element */
+function attachEmailBlur(input, errorEl) {
+  input.addEventListener('blur', () => {
+    const v = input.value.trim();
+    if (!v) { input.classList.remove('field-error'); if (errorEl) errorEl.textContent = ''; return; }
+    if (!isValidEmail(v)) {
+      input.classList.add('field-error');
+      if (errorEl) errorEl.textContent = 'Invalid email format';
+    } else {
+      input.classList.remove('field-error');
+      if (errorEl) errorEl.textContent = '';
+    }
+  });
+}
+
+// ════════════════════════════════════════════════════════════════════
 // PARSE FORM SCHEMAS
 // ════════════════════════════════════════════════════════════════════
 const PARSE_SCHEMAS = {
   network_entities: [
-    { key:'legal_name',   label:'Legal Name',   type:'text',     required:true,  hint:'Official registered name' },
-    { key:'trade_name',   label:'Trade / DBA',  type:'text',     hint:'Common trading name if different' },
-    { key:'slug',         label:'Slug',         type:'text',     required:true,  hint:'lowercase-hyphen, unique — auto-generated from legal name' },
-    { key:'primary_role', label:'Primary Role', type:'select',   required:true,
+    { key:'legal_name',          label:'Legal Name',      type:'text',     required:true,  hint:'Official registered name' },
+    { key:'trade_name',          label:'Trade / DBA',     type:'text',     hint:'Common trading name if different' },
+    { key:'slug',                label:'Slug',            type:'text',     required:true,  hint:'lowercase-hyphen, unique — auto-generated from legal name' },
+    { key:'primary_role',        label:'Primary Role',    type:'select',   required:true,
       options:['','manufacturer','distributor','consumer','user_org'] },
-    { key:'email',        label:'Email',        type:'email' },
-    { key:'phone',        label:'Phone',        type:'tel' },
-    { key:'website_url',  label:'Website',      type:'url' },
-    { key:'notes',        label:'Notes',        type:'textarea', wide:true },
+    { key:'email',               label:'Email',           type:'email',    hint:'Must be a valid email address' },
+    { key:'phone_country_code',  label:'Country Code',    type:'tel',      hint:'e.g. +1, +44' },
+    { key:'phone',               label:'Phone',           type:'tel',      hint:'(xxx) xxx-xxxx — formatted on exit' },
+    { key:'phone_ext',           label:'Extension',       type:'tel',      hint:'e.g. 204' },
+    { key:'website_url',         label:'Website',         type:'url' },
+    { key:'notes',               label:'Notes',           type:'textarea', wide:true },
   ],
   network_products: [
     { key:'name',         label:'Product Name',  type:'text',     required:true },
@@ -246,11 +295,22 @@ function renderParseForm(subId, targetTable, prefill = {}) {
     } else if (f.type === 'checkbox') {
       input = `<input type="checkbox" id="${id}" style="width:auto" ${prefill[f.key] ? 'checked' : ''}>`;
     } else {
-      input = `<input type="${f.type}" id="${id}" placeholder="—" value="${pre}">`;
+      input = `<input type="${f.type}" id="${id}" placeholder="—" value="${pre}"
+        data-format="${f.key === 'phone' ? 'phone' : f.type === 'email' ? 'email' : ''}"`
+        + `>`;
     }
     const hint = f.hint ? `<span class="hint">${f.hint}</span>` : '';
-    return `<div class="${wideClass}"><label for="${id}">${f.label} ${req}</label>${input}${hint}</div>`;
+    const errSpan = (f.type === 'email') ? `<span class="hint" id="err-${id}" style="color:#ef4444"></span>` : '';
+    return `<div class="${wideClass}"><label for="${id}">${f.label} ${req}</label>${input}${hint}${errSpan}</div>`;
   }).join('');
+
+  // Attach blur handlers after render
+  setTimeout(() => {
+    const phoneEl = document.getElementById(`pf-${subId}-phone`);
+    if (phoneEl) attachPhoneBlur(phoneEl);
+    const emailEl = document.getElementById(`pf-${subId}-email`);
+    if (emailEl) attachEmailBlur(emailEl, document.getElementById(`err-pf-${subId}-email`));
+  }, 0);
 
   return `<div class="parse-form-grid">${fields}</div>`;
 }
@@ -276,6 +336,8 @@ function collectParseForm(subId, targetTable) {
   if (targetTable === 'network_entities' && !result.slug && result.legal_name) {
     result.slug = slugify(result.legal_name);
   }
+  // Format phone on collect
+  if (result.phone) result.phone = formatPhone(result.phone);
   return result;
 }
 
@@ -418,6 +480,12 @@ window.beginParse = async (subId, targetTable) => {
       msgEl.textContent = 'Required: ' + missing.map(f => f.label).join(', ');
       return;
     }
+    // Validate email
+    if (parsed_fields.email && !isValidEmail(parsed_fields.email)) {
+      msgEl.className = 'msg error';
+      msgEl.textContent = 'Email address is not valid.';
+      return;
+    }
   }
 
   const conflicts = await detectConflicts(supabase, targetTable, parsed_fields);
@@ -455,7 +523,6 @@ window.beginParse = async (subId, targetTable) => {
 // PARSED RECORDS
 // ════════════════════════════════════════════════════════════════════
 async function loadParsed() {
-  // original_text lives directly on intake_parsed — no join needed
   let q = supabase.from('intake_parsed')
     .select('id, created_at, submission_id, target_table, parsed_fields, conflicts, conflict_severity, stage, parsed_by, reviewed_by, agent_notes, operator_notes, original_text, source_url')
     .order('created_at', { ascending: false })
@@ -493,7 +560,13 @@ async function loadParsed() {
           const opts = (f.options||[]).map(o => `<option value="${o}"${o===val?' selected':''}>${o||'Select…'}</option>`).join('');
           input = `<select id="${id}" data-ip="${r.id}" data-field="${f.key}" onchange="patchField(this)">${opts}</select>`;
         } else {
-          input = `<input type="${f.type}" id="${id}" value="${escHtml(String(val))}" data-ip="${r.id}" data-field="${f.key}" onchange="patchField(this)">`;
+          const errId = f.type === 'email' ? `err-edit-${r.id}-${f.key}` : '';
+          input = `<input type="${f.type}" id="${id}" value="${escHtml(String(val))}"
+            data-ip="${r.id}" data-field="${f.key}"
+            data-format="${f.key === 'phone' ? 'phone' : f.type === 'email' ? 'email' : ''}"
+            onchange="patchField(this)"
+            ${errId ? `data-err="${errId}"` : ''}>`
+            + (errId ? `<div class="field-error-msg" id="${errId}"></div>` : '');
         }
         return `<div class="parsed-field"><label>${f.label}</label>${input}</div>`;
       }).join('') + `</div>`;
@@ -505,7 +578,6 @@ async function loadParsed() {
         ).join('') + `</div>`;
     }
 
-    // original text collapsible — reads from intake_parsed.original_text directly
     const originalTextHtml = `
       <details class="parsed-detail" style="margin-bottom:0.75rem">
         <summary>📄 Original submission text</summary>
@@ -514,7 +586,6 @@ async function loadParsed() {
         }</div>
       </details>`;
 
-    // auto-parse confidence badge
     const isAuto = String(r.parsed_by||'').startsWith('auto:');
     const confidenceTag = isAuto
       ? (r.agent_notes?.includes('structured template')
@@ -548,7 +619,6 @@ async function loadParsed() {
           <div style="margin-top:0.5rem">${conflictsHtml}</div>
         </details>
 
-        <!-- Operator notes — saved independently on blur -->
         <div class="operator-notes-block">
           <label for="op-note-${r.id}">Operator Notes</label>
           <textarea
@@ -571,6 +641,13 @@ async function loadParsed() {
       </div>
     `;
   }).join('');
+
+  // Attach formatting/validation blur handlers to rendered inputs
+  document.querySelectorAll('input[data-format="phone"]').forEach(attachPhoneBlur);
+  document.querySelectorAll('input[data-format="email"]').forEach(el => {
+    const errEl = el.dataset.err ? document.getElementById(el.dataset.err) : null;
+    attachEmailBlur(el, errEl);
+  });
 }
 
 // ── Save operator notes on blur ──────────────────────────────────────
@@ -594,7 +671,27 @@ window.saveOperatorNotes = async (ipId) => {
 window.patchField = async (input) => {
   const ipId  = input.dataset.ip;
   const field = input.dataset.field;
-  const val   = input.type === 'checkbox' ? input.checked : input.value;
+  let val = input.type === 'checkbox' ? input.checked : input.value;
+
+  // Format phone before saving
+  if (input.dataset.format === 'phone' && val) {
+    val = formatPhone(val);
+    input.value = val;
+  }
+
+  // Validate email before saving
+  if (input.dataset.format === 'email' && val) {
+    const errEl = input.dataset.err ? document.getElementById(input.dataset.err) : null;
+    if (!isValidEmail(val)) {
+      input.classList.add('field-error');
+      if (errEl) errEl.textContent = 'Invalid email format';
+      return; // don't save invalid email
+    } else {
+      input.classList.remove('field-error');
+      if (errEl) errEl.textContent = '';
+    }
+  }
+
   const { data: cur } = await supabase.from('intake_parsed').select('parsed_fields').eq('id', ipId).single();
   const updated = { ...cur.parsed_fields, [field]: val };
   await supabase.from('intake_parsed').update({ parsed_fields: updated }).eq('id', ipId);
