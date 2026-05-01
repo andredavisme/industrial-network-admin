@@ -73,6 +73,17 @@
     .btn-reject  { background:#7f1d1d; } .btn-reject:hover  { background:#991b1b; }
     .btn-promote { background:#1d4ed8; } .btn-promote:hover { background:#2563eb; }
 
+    /* ── Operator notes block ───────────────────────────────── */
+    .operator-notes-block { margin-top:0.75rem; padding-top:0.75rem; border-top:1px solid #334155; }
+    .operator-notes-block label { font-size:0.7rem; color:#64748b; text-transform:uppercase; letter-spacing:0.04em; display:block; margin-bottom:0.35rem; }
+    .operator-notes-block textarea {
+      width:100%; background:#0f172a; border:1px solid #334155; border-radius:6px;
+      color:#e2e8f0; padding:0.5rem 0.75rem; font-size:0.82rem; min-height:64px;
+      resize:vertical; font-family:inherit;
+    }
+    .operator-notes-block textarea:focus { border-color:#3b82f6; outline:none; }
+    .operator-notes-saved { font-size:0.72rem; color:#4ade80; margin-top:0.25rem; min-height:1rem; }
+
     /* ── Stage tags ─────────────────────────────────────────── */
     .stage-tag { display:inline-block; padding:0.15rem 0.5rem; border-radius:4px; font-size:0.7rem; font-weight:700; text-transform:uppercase; letter-spacing:0.05em; }
     .stage-parsing         { background:#334155; color:#94a3b8; }
@@ -284,9 +295,6 @@ window.addGenericPair = (subId) => {
 
 // ════════════════════════════════════════════════════════════════════
 // AUTO-PARSE via Edge Function
-// Fires for every submission that has no intake_parsed_id.
-// Runs up to MAX_CONCURRENT at a time to avoid hammering the function.
-// After all complete, reloads both lists.
 // ════════════════════════════════════════════════════════════════════
 const MAX_CONCURRENT = 5;
 
@@ -310,11 +318,9 @@ async function autoParseAll(subs) {
 
   showProgress();
 
-  // Retrieve the session token to pass as Authorization header
   const { data: { session } } = await supabase.auth.getSession();
   const token = session?.access_token ?? '';
 
-  // Process in chunks of MAX_CONCURRENT
   for (let i = 0; i < subs.length; i += MAX_CONCURRENT) {
     const chunk = subs.slice(i, i + MAX_CONCURRENT);
     await Promise.all(chunk.map(async (s) => {
@@ -335,10 +341,9 @@ async function autoParseAll(subs) {
     }));
   }
 
-  // Small delay so the "done" banner is visible, then reload both panels
   await new Promise(r => setTimeout(r, 800));
   statusEl.innerHTML = '';
-  loadUnparsed(false);   // false = don't re-trigger auto-parse
+  loadUnparsed(false);
   loadParsed();
 }
 
@@ -356,10 +361,9 @@ async function loadUnparsed(triggerAutoParse = true) {
 
   const el = document.getElementById('unparsed-list');
 
-  // Fire auto-parse for all unparsed submissions on first load
   if (triggerAutoParse && subs?.length) {
     await autoParseAll(subs);
-    return; // autoParseAll calls loadUnparsed(false) when done
+    return;
   }
 
   if (!subs?.length) {
@@ -452,7 +456,7 @@ window.beginParse = async (subId, targetTable) => {
 // ════════════════════════════════════════════════════════════════════
 async function loadParsed() {
   let q = supabase.from('intake_parsed')
-    .select('id, created_at, submission_id, target_table, parsed_fields, conflicts, conflict_severity, stage, parsed_by, reviewed_by, agent_notes, source_url')
+    .select('id, created_at, submission_id, target_table, parsed_fields, conflicts, conflict_severity, stage, parsed_by, reviewed_by, agent_notes, operator_notes, source_url, submissions(description)')
     .order('created_at', { ascending: false })
     .limit(100);
   if (activeStage) q = q.eq('stage', activeStage);
@@ -500,6 +504,16 @@ async function loadParsed() {
         ).join('') + `</div>`;
     }
 
+    // original text collapsible (pulled from linked submission)
+    const originalText = r.submissions?.description || null;
+    const originalTextHtml = `
+      <details class="parsed-detail" style="margin-bottom:0.75rem">
+        <summary>📄 Original submission text</summary>
+        <div class="raw-text" style="margin-top:0.5rem;margin-bottom:0">${
+          originalText ? escHtml(originalText) : '<em style="color:#475569">No original text available.</em>'
+        }</div>
+      </details>`;
+
     // auto-parse confidence badge
     const isAuto = String(r.parsed_by||'').startsWith('auto:');
     const confidenceTag = isAuto
@@ -525,12 +539,25 @@ async function loadParsed() {
           <span>${new Date(r.created_at).toLocaleString()}</span>
         </div>
 
+        ${originalTextHtml}
+
         ${fieldsHtml}
 
         <details class="parsed-detail">
           <summary>Conflicts (${(r.conflicts||[]).length})</summary>
           <div style="margin-top:0.5rem">${conflictsHtml}</div>
         </details>
+
+        <!-- Operator notes — saved independently on blur -->
+        <div class="operator-notes-block">
+          <label for="op-note-${r.id}">Operator Notes</label>
+          <textarea
+            id="op-note-${r.id}"
+            placeholder="Internal notes visible only to operators — saved automatically on blur…"
+            onblur="saveOperatorNotes('${r.id}')"
+          >${escHtml(r.operator_notes||'')}</textarea>
+          <div class="operator-notes-saved" id="op-note-saved-${r.id}"></div>
+        </div>
 
         <div class="action-row">
           <textarea id="note-${r.id}" placeholder="Agent notes / rejection reason…">${escHtml(r.agent_notes||'')}</textarea>
@@ -545,6 +572,23 @@ async function loadParsed() {
     `;
   }).join('');
 }
+
+// ── Save operator notes on blur ──────────────────────────────────────
+window.saveOperatorNotes = async (ipId) => {
+  const val    = document.getElementById(`op-note-${ipId}`).value.trim() || null;
+  const savedEl = document.getElementById(`op-note-saved-${ipId}`);
+  const { error } = await supabase.from('intake_parsed')
+    .update({ operator_notes: val })
+    .eq('id', ipId);
+  if (error) {
+    savedEl.style.color = '#f87171';
+    savedEl.textContent = 'Failed to save.';
+  } else {
+    savedEl.style.color = '#4ade80';
+    savedEl.textContent = '✓ Saved';
+    setTimeout(() => { savedEl.textContent = ''; }, 2500);
+  }
+};
 
 // ── Patch a single parsed_fields key ────────────────────────────────
 window.patchField = async (input) => {
@@ -647,7 +691,7 @@ async function init() {
     activeStage = btn.dataset.stage;
     loadParsed();
   });
-  loadUnparsed();   // triggers auto-parse on first load
+  loadUnparsed();
   loadParsed();
   loadPromoteLog();
 }
