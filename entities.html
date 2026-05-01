@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Industrial Network — Entities</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<nav>
+  <a class="brand" href="index.html">🏭 Industrial Network</a>
+  <a href="index.html">Dashboard</a>
+  <a href="entities.html" class="active">Entities</a>
+  <a href="relationships.html">Relationships</a>
+  <a href="products.html">Products</a>
+  <a href="terms.html">Terms</a>
+  <a href="portals.html">Portals</a>
+</nav>
+
+<main>
+  <h1>Entities</h1>
+
+  <div class="card">
+    <h2>Add Entity</h2>
+    <form id="entity-form">
+      <div class="form-row">
+        <label>Legal Name *
+          <input id="legal_name" type="text" required placeholder="Acme Bearings Inc.">
+        </label>
+        <label>Trade Name
+          <input id="trade_name" type="text" placeholder="Acme Bearings">
+        </label>
+      </div>
+      <div class="form-row">
+        <label>Slug * (unique, lowercase-hyphen)
+          <input id="slug" type="text" required placeholder="acme-bearings">
+        </label>
+        <label>Primary Role *
+          <select id="primary_role" required>
+            <option value="">Select…</option>
+            <option value="manufacturer">Manufacturer</option>
+            <option value="distributor">Distributor</option>
+            <option value="consumer">Consumer</option>
+            <option value="user_org">User Org</option>
+          </select>
+        </label>
+      </div>
+      <div class="form-row">
+        <label>Email
+          <input id="email" type="email" placeholder="contact@acme.com">
+        </label>
+        <label>Phone
+          <input id="phone" type="text" placeholder="+1 (555) 000-0000">
+        </label>
+      </div>
+      <label>Website
+        <input id="website_url" type="url" placeholder="https://acme.com">
+      </label>
+      <label>Industries (hold Ctrl/Cmd to select multiple)
+        <select id="industry_ids" multiple size="4" style="height:auto"></select>
+      </label>
+      <label>Notes
+        <textarea id="notes" placeholder="Any relevant notes…"></textarea>
+      </label>
+      <button type="submit">Add Entity</button>
+      <div class="msg" id="form-msg"></div>
+    </form>
+  </div>
+
+  <div class="card">
+    <h2>All Entities</h2>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Name</th><th>Role</th><th>Industries</th><th>Status</th><th>Location</th><th>Actions</th></tr></thead>
+        <tbody id="entity-list"><tr><td colspan="6">Loading…</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+</main>
+
+<script type="module">
+import { supabase } from './supabase.js';
+
+const ROLE_BADGE = { manufacturer: 'badge-blue', distributor: 'badge-amber', consumer: 'badge-green', user_org: 'badge-purple' };
+
+let domains = [];
+
+async function loadDomains() {
+  const { data } = await supabase.from('domains').select('id, name, parent_id').not('parent_id', 'is', null).order('sort_order');
+  domains = data || [];
+  const sel = document.getElementById('industry_ids');
+  sel.innerHTML = domains.map(d => `<option value="${d.id}">${d.name}</option>`).join('');
+}
+
+async function loadEntities() {
+  const { data } = await supabase
+    .from('network_entities')
+    .select('id, legal_name, trade_name, primary_role, status, level1_id, network_entity_industries(domain_id, domains(name))')
+    .order('legal_name');
+
+  const tbody = document.getElementById('entity-list');
+  if (!data?.length) { tbody.innerHTML = '<tr><td colspan="6">No entities yet</td></tr>'; return; }
+
+  tbody.innerHTML = data.map(e => {
+    const industries = (e.network_entity_industries || []).map(i => i.domains?.name).filter(Boolean).join(', ') || '—';
+    const badge = ROLE_BADGE[e.primary_role] || 'badge-gray';
+    return `<tr>
+      <td><strong>${e.legal_name}</strong>${e.trade_name ? `<br><small style="color:#64748b">${e.trade_name}</small>` : ''}</td>
+      <td><span class="badge ${badge}">${e.primary_role}</span></td>
+      <td>${industries}</td>
+      <td><span class="badge badge-gray">${e.status}</span></td>
+      <td>—</td>
+      <td class="actions"><button class="secondary" onclick="deleteEntity('${e.id}')">Delete</button></td>
+    </tr>`;
+  }).join('');
+}
+
+window.deleteEntity = async (id) => {
+  if (!confirm('Delete this entity?')) return;
+  await supabase.from('network_entities').delete().eq('id', id);
+  loadEntities();
+};
+
+document.getElementById('entity-form').addEventListener('submit', async e => {
+  e.preventDefault();
+  const msg = document.getElementById('form-msg');
+  msg.className = 'msg';
+
+  const selectedIndustries = [...document.getElementById('industry_ids').selectedOptions].map(o => o.value);
+
+  const payload = {
+    legal_name: document.getElementById('legal_name').value.trim(),
+    trade_name: document.getElementById('trade_name').value.trim() || null,
+    slug: document.getElementById('slug').value.trim(),
+    primary_role: document.getElementById('primary_role').value,
+    email: document.getElementById('email').value.trim() || null,
+    phone: document.getElementById('phone').value.trim() || null,
+    website_url: document.getElementById('website_url').value.trim() || null,
+    notes: document.getElementById('notes').value.trim() || null,
+    status: 'published'
+  };
+
+  const { data, error } = await supabase.from('network_entities').insert(payload).select('id').single();
+  if (error) { msg.className = 'msg error'; msg.textContent = error.message; return; }
+
+  // Link industries
+  if (selectedIndustries.length && data?.id) {
+    await supabase.from('network_entity_industries').insert(
+      selectedIndustries.map((domain_id, i) => ({ entity_id: data.id, domain_id, is_primary: i === 0 }))
+    );
+  }
+
+  msg.className = 'msg success'; msg.textContent = 'Entity added!';
+  e.target.reset();
+  loadEntities();
+});
+
+// Auto-generate slug from legal name
+document.getElementById('legal_name').addEventListener('input', e => {
+  document.getElementById('slug').value = e.target.value.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+});
+
+loadDomains();
+loadEntities();
+</script>
+</body>
+</html>

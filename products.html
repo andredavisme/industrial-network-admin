@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Industrial Network — Products</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<nav>
+  <a class="brand" href="index.html">🏭 Industrial Network</a>
+  <a href="index.html">Dashboard</a>
+  <a href="entities.html">Entities</a>
+  <a href="relationships.html">Relationships</a>
+  <a href="products.html" class="active">Products</a>
+  <a href="terms.html">Terms</a>
+  <a href="portals.html">Portals</a>
+</nav>
+
+<main>
+  <h1>Products</h1>
+
+  <div class="card">
+    <h2>Add Product</h2>
+    <form id="product-form">
+      <div class="form-row">
+        <label>Manufacturer *
+          <select id="manufacturer_id" required><option value="">Loading…</option></select>
+        </label>
+        <label>Industry
+          <select id="prod-domain_id"><option value="">Select…</option></select>
+        </label>
+      </div>
+      <div class="form-row">
+        <label>Product Name *
+          <input id="prod-name" type="text" required placeholder="Deep Groove Ball Bearing">
+        </label>
+        <label>Part Number
+          <input id="part_number" type="text" placeholder="6205-2RS">
+        </label>
+      </div>
+      <label>Slug * (auto-generated)
+        <input id="prod-slug" type="text" required placeholder="deep-groove-ball-bearing-6205">
+      </label>
+      <label>Description
+        <textarea id="prod-description" placeholder="Product description…"></textarea>
+      </label>
+      <label>Specs (JSON — e.g. {"bore_mm": 25, "od_mm": 52, "load_rating_kn": 14.0})
+        <textarea id="specs" placeholder='{"bore_mm": 25}'></textarea>
+      </label>
+      <button type="submit">Add Product</button>
+      <div class="msg" id="prod-msg"></div>
+    </form>
+  </div>
+
+  <div class="card">
+    <h2>All Products</h2>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Name</th><th>Part #</th><th>Manufacturer</th><th>Industry</th><th>Status</th><th>Actions</th></tr></thead>
+        <tbody id="product-list"><tr><td colspan="6">Loading…</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+</main>
+
+<script type="module">
+import { supabase } from './supabase.js';
+
+async function loadSelects() {
+  const [mfr, dom] = await Promise.all([
+    supabase.from('network_entities').select('id, legal_name').eq('primary_role', 'manufacturer').order('legal_name'),
+    supabase.from('domains').select('id, name').not('parent_id', 'is', null).order('sort_order')
+  ]);
+  document.getElementById('manufacturer_id').innerHTML = '<option value="">Select manufacturer…</option>' + (mfr.data||[]).map(e=>`<option value="${e.id}">${e.legal_name}</option>`).join('');
+  document.getElementById('prod-domain_id').innerHTML = '<option value="">Select industry…</option>' + (dom.data||[]).map(d=>`<option value="${d.id}">${d.name}</option>`).join('');
+}
+
+async function loadProducts() {
+  const { data } = await supabase
+    .from('network_products')
+    .select('id, name, part_number, status, manufacturer:manufacturer_id(legal_name), domains(name)')
+    .order('name');
+
+  const tbody = document.getElementById('product-list');
+  if (!data?.length) { tbody.innerHTML = '<tr><td colspan="6">No products yet</td></tr>'; return; }
+  tbody.innerHTML = data.map(p => `<tr>
+    <td>${p.name}</td>
+    <td>${p.part_number || '—'}</td>
+    <td>${p.manufacturer?.legal_name || '—'}</td>
+    <td>${p.domains?.name || '—'}</td>
+    <td><span class="badge badge-gray">${p.status}</span></td>
+    <td><button class="secondary" onclick="deleteProd('${p.id}')">Delete</button></td>
+  </tr>`).join('');
+}
+
+window.deleteProd = async (id) => {
+  if (!confirm('Delete this product?')) return;
+  await supabase.from('network_products').delete().eq('id', id);
+  loadProducts();
+};
+
+document.getElementById('prod-name').addEventListener('input', e => {
+  const pn = document.getElementById('part_number').value;
+  const base = e.target.value.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+  document.getElementById('prod-slug').value = pn ? `${base}-${pn.toLowerCase().replace(/[^a-z0-9]+/g,'-')}` : base;
+});
+
+document.getElementById('product-form').addEventListener('submit', async e => {
+  e.preventDefault();
+  const msg = document.getElementById('prod-msg');
+  msg.className = 'msg';
+
+  let specs = null;
+  const specsRaw = document.getElementById('specs').value.trim();
+  if (specsRaw) {
+    try { specs = JSON.parse(specsRaw); } catch { msg.className = 'msg error'; msg.textContent = 'Specs must be valid JSON'; return; }
+  }
+
+  const payload = {
+    manufacturer_id: document.getElementById('manufacturer_id').value,
+    domain_id: document.getElementById('prod-domain_id').value || null,
+    name: document.getElementById('prod-name').value.trim(),
+    part_number: document.getElementById('part_number').value.trim() || null,
+    slug: document.getElementById('prod-slug').value.trim(),
+    description: document.getElementById('prod-description').value.trim() || null,
+    specs,
+    status: 'published'
+  };
+
+  const { error } = await supabase.from('network_products').insert(payload);
+  if (error) { msg.className = 'msg error'; msg.textContent = error.message; return; }
+  msg.className = 'msg success'; msg.textContent = 'Product added!';
+  e.target.reset();
+  loadProducts();
+});
+
+loadSelects(); loadProducts();
+</script>
+</body>
+</html>

@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Industrial Network — Portals</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<nav>
+  <a class="brand" href="index.html">🏭 Industrial Network</a>
+  <a href="index.html">Dashboard</a>
+  <a href="entities.html">Entities</a>
+  <a href="relationships.html">Relationships</a>
+  <a href="products.html">Products</a>
+  <a href="terms.html">Terms</a>
+  <a href="portals.html" class="active">Portals</a>
+</nav>
+
+<main>
+  <h1>Portals</h1>
+
+  <div class="card">
+    <h2>Create Portal</h2>
+    <form id="portal-form">
+      <div class="form-row">
+        <label>Entity *
+          <select id="portal-entity_id" required><option value="">Loading…</option></select>
+        </label>
+        <label>Slug * (becomes the page route)
+          <input id="portal-slug" type="text" required placeholder="acme-bearings">
+        </label>
+      </div>
+      <label>Access Level
+        <select id="portal-access_level">
+          <option value="read_own">Read Own (see only their network)</option>
+          <option value="read_network">Read Network (see all public entities)</option>
+          <option value="admin">Admin (full access)</option>
+        </select>
+      </label>
+      <button type="submit">Create Portal</button>
+      <div class="msg" id="portal-msg"></div>
+    </form>
+  </div>
+
+  <div class="card">
+    <h2>All Portals</h2>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Entity</th><th>Slug</th><th>Access</th><th>Active</th><th>Actions</th></tr></thead>
+        <tbody id="portal-list"><tr><td colspan="5">Loading…</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+</main>
+
+<script type="module">
+import { supabase } from './supabase.js';
+
+async function loadSelects() {
+  const { data } = await supabase.from('network_entities').select('id, legal_name').order('legal_name');
+  document.getElementById('portal-entity_id').innerHTML = '<option value="">Select entity…</option>' + (data||[]).map(e=>`<option value="${e.id}">${e.legal_name}</option>`).join('');
+}
+
+async function loadPortals() {
+  const { data } = await supabase
+    .from('network_portals')
+    .select('id, slug, access_level, is_active, entity:entity_id(legal_name)')
+    .order('created_at', { ascending: false });
+
+  const tbody = document.getElementById('portal-list');
+  if (!data?.length) { tbody.innerHTML = '<tr><td colspan="5">No portals yet</td></tr>'; return; }
+  tbody.innerHTML = data.map(p => `<tr>
+    <td>${p.entity?.legal_name || '—'}</td>
+    <td><code>${p.slug}</code></td>
+    <td><span class="badge badge-blue">${p.access_level.replace(/_/g,' ')}</span></td>
+    <td>${p.is_active ? '✅' : '⬜'}</td>
+    <td><button class="secondary" onclick="deletePortal('${p.id}')">Delete</button></td>
+  </tr>`).join('');
+}
+
+window.deletePortal = async (id) => {
+  if (!confirm('Delete this portal?')) return;
+  await supabase.from('network_portals').delete().eq('id', id);
+  loadPortals();
+};
+
+document.getElementById('portal-entity_id').addEventListener('change', e => {
+  const opt = e.target.selectedOptions[0];
+  if (opt?.value) document.getElementById('portal-slug').value = opt.text.toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'');
+});
+
+document.getElementById('portal-form').addEventListener('submit', async e => {
+  e.preventDefault();
+  const msg = document.getElementById('portal-msg');
+  msg.className = 'msg';
+
+  const payload = {
+    entity_id: document.getElementById('portal-entity_id').value,
+    slug: document.getElementById('portal-slug').value.trim(),
+    access_level: document.getElementById('portal-access_level').value
+  };
+
+  const { error } = await supabase.from('network_portals').insert(payload);
+  if (error) { msg.className = 'msg error'; msg.textContent = error.message; return; }
+  msg.className = 'msg success'; msg.textContent = 'Portal created!';
+  e.target.reset();
+  loadPortals();
+});
+
+loadSelects(); loadPortals();
+</script>
+</body>
+</html>

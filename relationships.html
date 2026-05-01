@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Industrial Network — Relationships</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<nav>
+  <a class="brand" href="index.html">🏭 Industrial Network</a>
+  <a href="index.html">Dashboard</a>
+  <a href="entities.html">Entities</a>
+  <a href="relationships.html" class="active">Relationships</a>
+  <a href="products.html">Products</a>
+  <a href="terms.html">Terms</a>
+  <a href="portals.html">Portals</a>
+</nav>
+
+<main>
+  <h1>Relationships</h1>
+
+  <div class="card">
+    <h2>Add Relationship</h2>
+    <form id="rel-form">
+      <div class="form-row">
+        <label>From Entity *
+          <select id="from_entity_id" required><option value="">Loading…</option></select>
+        </label>
+        <label>Relationship Type *
+          <select id="rel_type" required>
+            <option value="">Select…</option>
+            <option value="manufactures_for">Manufactures For</option>
+            <option value="distributes_for">Distributes For</option>
+            <option value="purchases_from">Purchases From</option>
+            <option value="end_user_of">End User Of</option>
+          </select>
+        </label>
+      </div>
+      <div class="form-row">
+        <label>To Entity *
+          <select id="to_entity_id" required><option value="">Loading…</option></select>
+        </label>
+        <label>Industry Scope
+          <select id="domain_id"><option value="">All industries</option></select>
+        </label>
+      </div>
+      <h2 style="margin-top:0.5rem">Qualification Funnel</h2>
+      <div class="funnel-row">
+        <input class="funnel-check" type="checkbox" id="considers_business">
+        <label for="considers_business" style="flex-direction:row;align-items:center;gap:0.5rem;font-size:0.875rem">Considers Business (X pool)</label>
+      </div>
+      <div class="funnel-row">
+        <input class="funnel-check" type="checkbox" id="accepts_business">
+        <label for="accepts_business" style="flex-direction:row;align-items:center;gap:0.5rem;font-size:0.875rem">Accepts Business (X-Y pool)</label>
+      </div>
+      <div class="funnel-row">
+        <input class="funnel-check" type="checkbox" id="terms_compliant">
+        <label for="terms_compliant" style="flex-direction:row;align-items:center;gap:0.5rem;font-size:0.875rem">Terms Compliant ((X-Y)-Z pool)</label>
+      </div>
+      <label>Status
+        <select id="status">
+          <option value="active">Active</option>
+          <option value="preferred">Preferred</option>
+          <option value="inactive">Inactive</option>
+          <option value="disqualified">Disqualified</option>
+        </select>
+      </label>
+      <label>Notes
+        <textarea id="rel-notes" placeholder="Optional notes…"></textarea>
+      </label>
+      <button type="submit">Add Relationship</button>
+      <div class="msg" id="rel-msg"></div>
+    </form>
+  </div>
+
+  <div class="card">
+    <h2>All Relationships</h2>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>From</th><th>Type</th><th>To</th><th>Considers</th><th>Accepts</th><th>Compliant</th><th>Status</th><th>Actions</th></tr></thead>
+        <tbody id="rel-list"><tr><td colspan="8">Loading…</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+</main>
+
+<script type="module">
+import { supabase } from './supabase.js';
+
+const STATUS_BADGE = { active: 'badge-green', preferred: 'badge-amber', inactive: 'badge-gray', disqualified: 'badge-red' };
+const check = v => v ? '✅' : '⬜';
+
+async function loadEntities() {
+  const { data } = await supabase.from('network_entities').select('id, legal_name').order('legal_name');
+  ['from_entity_id', 'to_entity_id'].forEach(id => {
+    const sel = document.getElementById(id);
+    sel.innerHTML = '<option value="">Select entity…</option>' + (data || []).map(e => `<option value="${e.id}">${e.legal_name}</option>`).join('');
+  });
+}
+
+async function loadDomains() {
+  const { data } = await supabase.from('domains').select('id, name').not('parent_id', 'is', null).order('sort_order');
+  const sel = document.getElementById('domain_id');
+  sel.innerHTML = '<option value="">All industries</option>' + (data || []).map(d => `<option value="${d.id}">${d.name}</option>`).join('');
+}
+
+async function loadRels() {
+  const { data } = await supabase
+    .from('network_relationships')
+    .select('id, rel_type, considers_business, accepts_business, terms_compliant, status, from_entity:from_entity_id(legal_name), to_entity:to_entity_id(legal_name)')
+    .order('created_at', { ascending: false });
+
+  const tbody = document.getElementById('rel-list');
+  if (!data?.length) { tbody.innerHTML = '<tr><td colspan="8">No relationships yet</td></tr>'; return; }
+
+  tbody.innerHTML = data.map(r => `<tr>
+    <td>${r.from_entity?.legal_name || '—'}</td>
+    <td><small>${r.rel_type.replace(/_/g,' ')}</small></td>
+    <td>${r.to_entity?.legal_name || '—'}</td>
+    <td style="text-align:center">${check(r.considers_business)}</td>
+    <td style="text-align:center">${check(r.accepts_business)}</td>
+    <td style="text-align:center">${check(r.terms_compliant)}</td>
+    <td><span class="badge ${STATUS_BADGE[r.status] || 'badge-gray'}">${r.status}</span></td>
+    <td><button class="secondary" onclick="deleteRel('${r.id}')">Delete</button></td>
+  </tr>`).join('');
+}
+
+window.deleteRel = async (id) => {
+  if (!confirm('Delete this relationship?')) return;
+  await supabase.from('network_relationships').delete().eq('id', id);
+  loadRels();
+};
+
+document.getElementById('rel-form').addEventListener('submit', async e => {
+  e.preventDefault();
+  const msg = document.getElementById('rel-msg');
+  msg.className = 'msg';
+
+  const payload = {
+    from_entity_id: document.getElementById('from_entity_id').value,
+    to_entity_id: document.getElementById('to_entity_id').value,
+    rel_type: document.getElementById('rel_type').value,
+    domain_id: document.getElementById('domain_id').value || null,
+    considers_business: document.getElementById('considers_business').checked,
+    accepts_business: document.getElementById('accepts_business').checked,
+    terms_compliant: document.getElementById('terms_compliant').checked,
+    status: document.getElementById('status').value,
+    notes: document.getElementById('rel-notes').value.trim() || null
+  };
+
+  const { error } = await supabase.from('network_relationships').insert(payload);
+  if (error) { msg.className = 'msg error'; msg.textContent = error.message; return; }
+
+  msg.className = 'msg success'; msg.textContent = 'Relationship added!';
+  e.target.reset();
+  loadRels();
+});
+
+loadEntities(); loadDomains(); loadRels();
+</script>
+</body>
+</html>

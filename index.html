@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Industrial Network — Dashboard</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<nav>
+  <a class="brand" href="index.html">🏭 Industrial Network</a>
+  <a href="index.html" class="active">Dashboard</a>
+  <a href="entities.html">Entities</a>
+  <a href="relationships.html">Relationships</a>
+  <a href="products.html">Products</a>
+  <a href="terms.html">Terms</a>
+  <a href="portals.html">Portals</a>
+</nav>
+
+<main>
+  <h1>Dashboard</h1>
+
+  <div class="stat-grid" id="stats">
+    <div class="stat-card"><div class="label">Entities</div><div class="value" id="s-entities">—</div></div>
+    <div class="stat-card"><div class="label">Manufacturers</div><div class="value" id="s-mfr">—</div></div>
+    <div class="stat-card"><div class="label">Distributors</div><div class="value" id="s-dist">—</div></div>
+    <div class="stat-card"><div class="label">Consumers</div><div class="value" id="s-cons">—</div></div>
+    <div class="stat-card"><div class="label">Relationships</div><div class="value" id="s-rels">—</div></div>
+    <div class="stat-card"><div class="label">Terms Compliant</div><div class="value" id="s-compliant">—</div></div>
+    <div class="stat-card"><div class="label">Products</div><div class="value" id="s-products">—</div></div>
+    <div class="stat-card"><div class="label">Active Portals</div><div class="value" id="s-portals">—</div></div>
+  </div>
+
+  <div class="card">
+    <h2>Qualification Funnel</h2>
+    <table>
+      <thead><tr><th>Stage</th><th>Count</th><th>Description</th></tr></thead>
+      <tbody>
+        <tr><td>X — Considers Business</td><td id="f-considers">—</td><td>Aware and willing to engage</td></tr>
+        <tr><td>X-Y — Accepts Business</td><td id="f-accepts">—</td><td>Active participation</td></tr>
+        <tr><td>(X-Y)-Z — Terms Compliant</td><td id="f-compliant">—</td><td>Fully qualified per entity terms</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="card">
+    <h2>Entities by Industry</h2>
+    <table>
+      <thead><tr><th>Industry</th><th>Entities</th></tr></thead>
+      <tbody id="industry-rows"><tr><td colspan="2">Loading…</td></tr></tbody>
+    </table>
+  </div>
+</main>
+
+<script type="module">
+import { supabase } from './supabase.js';
+
+async function load() {
+  const [entities, rels, products, portals] = await Promise.all([
+    supabase.from('network_entities').select('id, primary_role', { count: 'exact' }),
+    supabase.from('network_relationships').select('id, considers_business, accepts_business, terms_compliant', { count: 'exact' }),
+    supabase.from('network_products').select('id', { count: 'exact' }),
+    supabase.from('network_portals').select('id', { count: 'exact' }).eq('is_active', true)
+  ]);
+
+  const eData = entities.data || [];
+  document.getElementById('s-entities').textContent = entities.count ?? 0;
+  document.getElementById('s-mfr').textContent = eData.filter(e => e.primary_role === 'manufacturer').length;
+  document.getElementById('s-dist').textContent = eData.filter(e => e.primary_role === 'distributor').length;
+  document.getElementById('s-cons').textContent = eData.filter(e => e.primary_role === 'consumer').length;
+  document.getElementById('s-rels').textContent = rels.count ?? 0;
+  document.getElementById('s-products').textContent = products.count ?? 0;
+  document.getElementById('s-portals').textContent = portals.count ?? 0;
+
+  const rData = rels.data || [];
+  document.getElementById('f-considers').textContent = rData.filter(r => r.considers_business).length;
+  document.getElementById('f-accepts').textContent = rData.filter(r => r.accepts_business).length;
+  document.getElementById('f-compliant').textContent = rData.filter(r => r.terms_compliant).length;
+  document.getElementById('s-compliant').textContent = rData.filter(r => r.terms_compliant).length;
+
+  // Industry breakdown via network_entity_industries + domains
+  const { data: ind } = await supabase
+    .from('network_entity_industries')
+    .select('domain_id, domains(name)');
+
+  const counts = {};
+  (ind || []).forEach(r => {
+    const name = r.domains?.name || r.domain_id;
+    counts[name] = (counts[name] || 0) + 1;
+  });
+
+  const tbody = document.getElementById('industry-rows');
+  const rows = Object.entries(counts);
+  tbody.innerHTML = rows.length
+    ? rows.map(([name, n]) => `<tr><td>${name}</td><td>${n}</td></tr>`).join('')
+    : '<tr><td colspan="2">No industry assignments yet</td></tr>';
+}
+
+load();
+</script>
+</body>
+</html>
