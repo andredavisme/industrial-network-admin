@@ -1,0 +1,485 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Industrial Network — Intake Review</title>
+  <link rel="stylesheet" href="style.css">
+  <style>
+    .pipeline-bar {
+      display: flex;
+      gap: 0.5rem;
+      margin-bottom: 1.5rem;
+      flex-wrap: wrap;
+    }
+    .pipeline-bar button {
+      background: #1e293b;
+      border: 1px solid #334155;
+      color: #94a3b8;
+      font-size: 0.8rem;
+      padding: 0.4rem 0.9rem;
+    }
+    .pipeline-bar button.active {
+      background: #3b82f6;
+      border-color: #3b82f6;
+      color: #fff;
+    }
+    .intake-card {
+      background: #1e293b;
+      border: 1px solid #334155;
+      border-radius: 10px;
+      padding: 1.25rem 1.5rem;
+      margin-bottom: 1rem;
+    }
+    .intake-card.conflict-high   { border-left: 4px solid #ef4444; }
+    .intake-card.conflict-medium { border-left: 4px solid #f59e0b; }
+    .intake-card.conflict-low    { border-left: 4px solid #3b82f6; }
+    .intake-card.conflict-none   { border-left: 4px solid #22c55e; }
+    .intake-meta {
+      display: flex;
+      gap: 0.75rem;
+      flex-wrap: wrap;
+      align-items: center;
+      margin-bottom: 0.75rem;
+      font-size: 0.8rem;
+      color: #64748b;
+    }
+    .intake-meta strong { color: #94a3b8; }
+    .raw-text {
+      background: #0f172a;
+      border: 1px solid #1e293b;
+      border-radius: 6px;
+      padding: 0.75rem 1rem;
+      font-size: 0.8rem;
+      color: #94a3b8;
+      white-space: pre-wrap;
+      margin-bottom: 1rem;
+      max-height: 120px;
+      overflow-y: auto;
+    }
+    .parsed-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+      gap: 0.5rem;
+      margin-bottom: 1rem;
+    }
+    .parsed-field {
+      background: #0f172a;
+      border: 1px solid #334155;
+      border-radius: 6px;
+      padding: 0.5rem 0.75rem;
+    }
+    .parsed-field label {
+      font-size: 0.7rem;
+      color: #64748b;
+      margin-bottom: 0.15rem;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+    .parsed-field input, .parsed-field select {
+      font-size: 0.85rem;
+      padding: 0.3rem 0.5rem;
+      background: transparent;
+      border: none;
+      border-bottom: 1px solid #334155;
+      border-radius: 0;
+      color: #e2e8f0;
+      width: 100%;
+    }
+    .parsed-field input:focus, .parsed-field select:focus {
+      border-bottom-color: #3b82f6;
+      outline: none;
+    }
+    .conflict-item {
+      background: #1c0a0a;
+      border: 1px solid #7f1d1d;
+      border-radius: 6px;
+      padding: 0.5rem 0.75rem;
+      font-size: 0.8rem;
+      color: #fca5a5;
+      margin-bottom: 0.4rem;
+    }
+    .action-row {
+      display: flex;
+      gap: 0.5rem;
+      align-items: center;
+      flex-wrap: wrap;
+      margin-top: 0.75rem;
+      padding-top: 0.75rem;
+      border-top: 1px solid #334155;
+    }
+    .action-row textarea {
+      flex: 1;
+      min-width: 200px;
+      min-height: 2.5rem;
+      font-size: 0.8rem;
+      padding: 0.4rem 0.6rem;
+    }
+    .btn-approve { background: #166534; }
+    .btn-approve:hover { background: #15803d; }
+    .btn-reject  { background: #7f1d1d; }
+    .btn-reject:hover  { background: #991b1b; }
+    .btn-promote { background: #1d4ed8; }
+    .btn-promote:hover { background: #2563eb; }
+    .stage-tag {
+      display: inline-block;
+      padding: 0.15rem 0.5rem;
+      border-radius: 4px;
+      font-size: 0.7rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+    .stage-parsing        { background: #334155; color: #94a3b8; }
+    .stage-awaiting_review { background: #92400e; color: #fde68a; }
+    .stage-approved       { background: #166534; color: #bbf7d0; }
+    .stage-promoted       { background: #1d4ed8; color: #bfdbfe; }
+    .stage-rejected       { background: #7f1d1d; color: #fca5a5; }
+    .empty-state {
+      text-align: center;
+      color: #475569;
+      padding: 3rem 1rem;
+      font-size: 0.9rem;
+    }
+    .parse-panel {
+      border-top: 1px solid #334155;
+      margin-top: 0.75rem;
+      padding-top: 0.75rem;
+    }
+    .parse-panel h4 {
+      font-size: 0.8rem;
+      color: #64748b;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      margin-bottom: 0.5rem;
+    }
+    .json-editor {
+      width: 100%;
+      font-family: monospace;
+      font-size: 0.8rem;
+      min-height: 120px;
+      background: #0f172a;
+      color: #a5f3fc;
+      border: 1px solid #334155;
+      border-radius: 6px;
+      padding: 0.6rem;
+    }
+    .promote-log-row {
+      font-size: 0.8rem;
+      color: #94a3b8;
+    }
+    .promote-log-row td { vertical-align: top; }
+    details.parsed-detail > summary {
+      cursor: pointer;
+      font-size: 0.8rem;
+      color: #64748b;
+      padding: 0.25rem 0;
+      user-select: none;
+      list-style: none;
+    }
+    details.parsed-detail > summary:hover { color: #94a3b8; }
+  </style>
+</head>
+<body>
+
+<nav>
+  <a class="brand" href="index.html">🏭 Industrial Network</a>
+  <a href="index.html">Dashboard</a>
+  <a href="entities.html">Entities</a>
+  <a href="relationships.html">Relationships</a>
+  <a href="products.html">Products</a>
+  <a href="terms.html">Terms</a>
+  <a href="portals.html">Portals</a>
+  <a href="intake-review.html" class="active">Intake Review</a>
+  <span style="flex:1"></span>
+  <button class="secondary" id="signout-btn" style="display:none;font-size:0.8rem;padding:0.4rem 0.9rem;align-self:center">Sign Out</button>
+</nav>
+
+<main>
+  <h1>Intake Review <span class="badge badge-amber" style="font-size:0.8rem;vertical-align:middle" id="pending-count"></span></h1>
+
+  <div class="card" style="padding:1rem 1.5rem;margin-bottom:1rem">
+    <div style="font-size:0.85rem;color:#94a3b8;line-height:1.6">
+      <strong style="color:#e2e8f0">Pipeline:</strong>
+      Raw submissions arrive as <em>unverified text</em>. Parse them into structured fields, resolve conflicts, then Approve → Promote to write the canonical record to the master database. The original submission data is never written directly.
+    </div>
+  </div>
+
+  <!-- Stage filter -->
+  <div class="pipeline-bar" id="stage-filter">
+    <button class="active" data-stage="">All</button>
+    <button data-stage="parsing">Parsing</button>
+    <button data-stage="awaiting_review">Awaiting Review</button>
+    <button data-stage="approved">Approved</button>
+    <button data-stage="rejected">Rejected</button>
+    <button data-stage="promoted">Promoted</button>
+  </div>
+
+  <!-- Intake queue (submissions without a parsed record yet) -->
+  <div class="card">
+    <h2>📥 Unparsed Submissions</h2>
+    <div id="unparsed-list"><div class="empty-state">Loading…</div></div>
+  </div>
+
+  <!-- Intake parsed records -->
+  <div class="card">
+    <h2>🔍 Parsed Records</h2>
+    <div id="parsed-list"><div class="empty-state">Loading…</div></div>
+  </div>
+
+  <!-- Promote Log -->
+  <div class="card">
+    <h2>✅ Promote Log</h2>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Promoted At</th><th>Table</th><th>Operation</th><th>Master ID</th><th>By</th><th>Notes</th></tr></thead>
+        <tbody id="promote-log"><tr><td colspan="6">Loading…</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+</main>
+
+<script type="module">
+import { supabase, requireAuth } from './supabase.js';
+import { promoteToMaster, detectConflicts } from './promote.js';
+
+let activeStage = '';
+
+async function init() {
+  await requireAuth();
+  document.getElementById('signout-btn').style.display = 'flex';
+  document.getElementById('signout-btn').addEventListener('click', async () => {
+    await supabase.auth.signOut(); location.reload();
+  });
+
+  document.getElementById('stage-filter').addEventListener('click', e => {
+    const btn = e.target.closest('[data-stage]');
+    if (!btn) return;
+    document.querySelectorAll('#stage-filter button').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    activeStage = btn.dataset.stage;
+    loadParsed();
+  });
+
+  loadUnparsed();
+  loadParsed();
+  loadPromoteLog();
+}
+
+// ── Load raw submissions that have no intake_parsed record yet ──
+async function loadUnparsed() {
+  const { data: subs } = await supabase
+    .from('submissions')
+    .select('id, created_at, target_table, description, submitter_name, submitter_email, status, has_files')
+    .is('intake_parsed_id', null)
+    .neq('status', 'rejected')
+    .order('created_at', { ascending: false })
+    .limit(50);
+
+  const el = document.getElementById('unparsed-list');
+  if (!subs?.length) { el.innerHTML = '<div class="empty-state">No unparsed submissions.</div>'; return; }
+
+  const countEl = document.getElementById('pending-count');
+  countEl.textContent = subs.length + ' pending';
+
+  el.innerHTML = subs.map(s => `
+    <div class="intake-card conflict-none" id="sub-${s.id}">
+      <div class="intake-meta">
+        <strong>${s.target_table}</strong>
+        <span class="stage-tag stage-parsing">unparsed</span>
+        <span>${s.submitter_name || 'Anonymous'}</span>
+        <span>${new Date(s.created_at).toLocaleString()}</span>
+        ${s.has_files ? '<span class="badge badge-purple">has files</span>' : ''}
+      </div>
+      <div class="raw-text">${escHtml(s.description || '(no description)')}</div>
+      <details class="parsed-detail">
+        <summary>▶ Begin Parsing — create structured record</summary>
+        <div class="parse-panel">
+          <h4>Agent: paste or type parsed_fields JSON for <em>${s.target_table}</em></h4>
+          <textarea class="json-editor" id="pf-${s.id}" placeholder='{ "legal_name": "Acme Corp", "slug": "acme-corp", "primary_role": "manufacturer" }'></textarea>
+          <div style="margin-top:0.5rem;display:flex;gap:0.5rem;align-items:center;flex-wrap:wrap">
+            <label style="flex:1;min-width:160px;margin:0">
+              <input type="text" id="agent-${s.id}" placeholder="Your name / agent ID" style="font-size:0.8rem;padding:0.3rem 0.5rem">
+            </label>
+            <button onclick="beginParse('${s.id}','${s.target_table}')">Create Parsed Record</button>
+          </div>
+          <div class="msg" id="parse-msg-${s.id}"></div>
+        </div>
+      </details>
+    </div>
+  `).join('');
+}
+
+window.beginParse = async (subId, targetTable) => {
+  const msgEl = document.getElementById(`parse-msg-${subId}`);
+  msgEl.className = 'msg';
+  const raw = document.getElementById(`pf-${subId}`).value.trim();
+  const agent = document.getElementById(`agent-${subId}`).value.trim() || 'agent';
+  let parsed_fields;
+  try { parsed_fields = raw ? JSON.parse(raw) : {}; }
+  catch { msgEl.className = 'msg error'; msgEl.textContent = 'Invalid JSON in parsed fields.'; return; }
+
+  const conflicts = await detectConflicts(supabase, targetTable, parsed_fields);
+  const severity = conflicts.length === 0 ? 'none'
+    : conflicts.some(c => c.severity === 'high') ? 'high'
+    : conflicts.some(c => c.severity === 'medium') ? 'medium' : 'low';
+
+  const { data: ip, error } = await supabase.from('intake_parsed').insert({
+    submission_id: subId,
+    target_table: targetTable,
+    parsed_fields,
+    conflicts,
+    conflict_severity: severity,
+    parsed_by: agent,
+    stage: 'awaiting_review'
+  }).select('id').single();
+
+  if (error) { msgEl.className = 'msg error'; msgEl.textContent = error.message; return; }
+
+  // Link back on the submission
+  await supabase.from('submissions')
+    .update({ intake_parsed_id: ip.id, parsed_at: new Date().toISOString(), parsed_by: agent, status: 'under_review' })
+    .eq('id', subId);
+
+  msgEl.className = 'msg success';
+  msgEl.textContent = '✅ Parsed record created. Refreshing…';
+  setTimeout(() => { loadUnparsed(); loadParsed(); }, 800);
+};
+
+// ── Load intake_parsed records ──
+async function loadParsed() {
+  let q = supabase.from('intake_parsed')
+    .select('id, created_at, updated_at, submission_id, target_table, parsed_fields, conflicts, conflict_severity, stage, parsed_by, reviewed_by, agent_notes, source_url')
+    .order('created_at', { ascending: false })
+    .limit(100);
+  if (activeStage) q = q.eq('stage', activeStage);
+
+  const { data: rows } = await q;
+  const el = document.getElementById('parsed-list');
+  if (!rows?.length) { el.innerHTML = '<div class="empty-state">No parsed records' + (activeStage ? ` in stage "${activeStage}"` : '') + '.</div>'; return; }
+
+  el.innerHTML = rows.map(r => {
+    const conflictClass = `conflict-${r.conflict_severity}`;
+    const conflictsHtml = (r.conflicts||[]).length
+      ? r.conflicts.map(c => `<div class="conflict-item">⚠ <strong>${c.field}</strong>: existing = ${escHtml(String(c.existing_value))}, incoming = ${escHtml(String(c.incoming_value))} <span style="color:#f87171">[${c.severity}]</span></div>`).join('')
+      : '<div style="font-size:0.8rem;color:#4ade80">✓ No conflicts detected</div>';
+
+    const fieldsHtml = Object.entries(r.parsed_fields||{}).map(([k,v]) =>
+      `<div class="parsed-field"><label>${k}</label><input value="${escHtml(String(v))}" data-ip="${r.id}" data-field="${k}" onchange="patchField(this)"></div>`
+    ).join('');
+
+    const canApprove  = ['parsing','awaiting_review'].includes(r.stage);
+    const canPromote  = r.stage === 'approved';
+    const canReject   = ['parsing','awaiting_review','approved'].includes(r.stage);
+
+    return `
+      <div class="intake-card ${conflictClass}" id="ip-${r.id}">
+        <div class="intake-meta">
+          <strong>${r.target_table}</strong>
+          <span class="stage-tag stage-${r.stage}">${r.stage.replace('_',' ')}</span>
+          <span class="badge badge-${r.conflict_severity === 'none' ? 'green' : r.conflict_severity === 'high' ? 'red' : 'amber'}">
+            ${r.conflict_severity} conflict
+          </span>
+          <span>Parsed by ${escHtml(r.parsed_by||'—')}</span>
+          <span>${new Date(r.created_at).toLocaleString()}</span>
+        </div>
+
+        <div class="parsed-grid">${fieldsHtml || '<div style="color:#475569;font-size:0.8rem">No structured fields yet.</div>'}</div>
+
+        <details class="parsed-detail">
+          <summary>Conflicts (${(r.conflicts||[]).length})</summary>
+          <div style="margin-top:0.5rem">${conflictsHtml}</div>
+        </details>
+
+        <div class="action-row">
+          <textarea id="note-${r.id}" placeholder="Agent notes / rejection reason…">${escHtml(r.agent_notes||'')}</textarea>
+          <input type="text" id="reviewer-${r.id}" placeholder="Reviewer name" value="${escHtml(r.reviewed_by||'')}" style="max-width:160px;font-size:0.8rem;padding:0.35rem 0.5rem">
+          ${canApprove  ? `<button class="btn-approve" onclick="approveRecord('${r.id}')">✓ Approve</button>` : ''}
+          ${canPromote  ? `<button class="btn-promote" onclick="promoteRecord('${r.id}')">⬆ Promote to Master</button>` : ''}
+          ${canReject   ? `<button class="btn-reject"  onclick="rejectRecord('${r.id}')">✗ Reject</button>` : ''}
+          <div class="msg" id="ip-msg-${r.id}" style="margin-top:0"></div>
+        </div>
+      </div>
+    `;
+  }).join('');
+}
+
+window.patchField = async (input) => {
+  const ipId = input.dataset.ip;
+  const field = input.dataset.field;
+  const { data: cur } = await supabase.from('intake_parsed').select('parsed_fields').eq('id', ipId).single();
+  const updated = { ...cur.parsed_fields, [field]: input.value };
+  await supabase.from('intake_parsed').update({ parsed_fields: updated }).eq('id', ipId);
+};
+
+window.approveRecord = async (ipId) => {
+  const reviewer = document.getElementById(`reviewer-${ipId}`).value.trim() || 'agent';
+  const notes    = document.getElementById(`note-${ipId}`).value.trim() || null;
+  const msgEl    = document.getElementById(`ip-msg-${ipId}`);
+  const { error } = await supabase.from('intake_parsed').update({
+    stage: 'approved', reviewed_by: reviewer, reviewed_at: new Date().toISOString(), agent_notes: notes
+  }).eq('id', ipId);
+  if (error) { msgEl.className='msg error'; msgEl.textContent=error.message; return; }
+  msgEl.className='msg success'; msgEl.textContent='Approved. Ready to promote.';
+  setTimeout(loadParsed, 600);
+};
+
+window.rejectRecord = async (ipId) => {
+  const reviewer = document.getElementById(`reviewer-${ipId}`).value.trim() || 'agent';
+  const notes    = document.getElementById(`note-${ipId}`).value.trim() || null;
+  const msgEl    = document.getElementById(`ip-msg-${ipId}`);
+  const { error } = await supabase.from('intake_parsed').update({
+    stage: 'rejected', reviewed_by: reviewer, reviewed_at: new Date().toISOString(),
+    rejection_reason: notes, agent_notes: notes
+  }).eq('id', ipId);
+  // Mark submission rejected too
+  const { data: ip } = await supabase.from('intake_parsed').select('submission_id').eq('id', ipId).single();
+  if (ip?.submission_id) await supabase.from('submissions').update({ status: 'rejected' }).eq('id', ip.submission_id);
+  if (error) { msgEl.className='msg error'; msgEl.textContent=error.message; return; }
+  msgEl.className='msg success'; msgEl.textContent='Rejected. Submission discarded.';
+  setTimeout(loadParsed, 600);
+};
+
+window.promoteRecord = async (ipId) => {
+  const reviewer = document.getElementById(`reviewer-${ipId}`).value.trim() || 'agent';
+  const notes    = document.getElementById(`note-${ipId}`).value.trim() || null;
+  const msgEl    = document.getElementById(`ip-msg-${ipId}`);
+  msgEl.className = 'msg'; msgEl.textContent = 'Promoting…';
+
+  const result = await promoteToMaster(supabase, ipId, reviewer, notes);
+  if (result.error) {
+    msgEl.className = 'msg error'; msgEl.textContent = result.error;
+  } else {
+    msgEl.className = 'msg success';
+    msgEl.textContent = `✅ Promoted → ${result.target_table} / ${result.master_record_id}`;
+    setTimeout(() => { loadParsed(); loadPromoteLog(); }, 800);
+  }
+};
+
+async function loadPromoteLog() {
+  const { data } = await supabase.from('intake_promote_log')
+    .select('promoted_at, target_table, operation, master_record_id, promoted_by, agent_notes')
+    .order('promoted_at', { ascending: false })
+    .limit(50);
+  const tbody = document.getElementById('promote-log');
+  if (!data?.length) { tbody.innerHTML = '<tr><td colspan="6">No promotions yet.</td></tr>'; return; }
+  tbody.innerHTML = data.map(r => `
+    <tr class="promote-log-row">
+      <td>${new Date(r.promoted_at).toLocaleString()}</td>
+      <td>${r.target_table}</td>
+      <td><span class="badge ${r.operation==='insert'?'badge-green':'badge-amber'}">${r.operation}</span></td>
+      <td style="font-family:monospace;font-size:0.72rem">${r.master_record_id}</td>
+      <td>${escHtml(r.promoted_by||'—')}</td>
+      <td>${escHtml(r.agent_notes||'—')}</td>
+    </tr>
+  `).join('');
+}
+
+function escHtml(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+init();
+</script>
+</body>
+</html>
