@@ -16,6 +16,8 @@
   <a href="products.html" class="active">Products</a>
   <a href="terms.html">Terms</a>
   <a href="portals.html">Portals</a>
+  <span style="flex:1"></span>
+  <button class="secondary" id="signout-btn" style="display:none;font-size:0.8rem;padding:0.4rem 0.9rem;align-self:center">Sign Out</button>
 </nav>
 
 <main>
@@ -66,7 +68,17 @@
 </main>
 
 <script type="module">
-import { supabase } from './supabase.js';
+import { supabase, requireAuth } from './supabase.js';
+
+async function init() {
+  await requireAuth();
+  document.getElementById('signout-btn').style.display = 'flex';
+  document.getElementById('signout-btn').addEventListener('click', async () => {
+    await supabase.auth.signOut();
+    location.reload();
+  });
+  loadSelects(); loadProducts();
+}
 
 async function loadSelects() {
   const [mfr, dom] = await Promise.all([
@@ -136,7 +148,7 @@ document.getElementById('product-form').addEventListener('submit', async e => {
   loadProducts();
 });
 
-loadSelects(); loadProducts();
+init();
 </script>
 </body>
 </html>

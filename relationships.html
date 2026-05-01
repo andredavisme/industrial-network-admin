@@ -16,6 +16,8 @@
   <a href="products.html">Products</a>
   <a href="terms.html">Terms</a>
   <a href="portals.html">Portals</a>
+  <span style="flex:1"></span>
+  <button class="secondary" id="signout-btn" style="display:none;font-size:0.8rem;padding:0.4rem 0.9rem;align-self:center">Sign Out</button>
 </nav>
 
 <main>
@@ -87,10 +89,20 @@
 </main>
 
 <script type="module">
-import { supabase } from './supabase.js';
+import { supabase, requireAuth } from './supabase.js';
 
 const STATUS_BADGE = { active: 'badge-green', preferred: 'badge-amber', inactive: 'badge-gray', disqualified: 'badge-red' };
 const check = v => v ? '✅' : '⬜';
+
+async function init() {
+  await requireAuth();
+  document.getElementById('signout-btn').style.display = 'flex';
+  document.getElementById('signout-btn').addEventListener('click', async () => {
+    await supabase.auth.signOut();
+    location.reload();
+  });
+  loadEntities(); loadDomains(); loadRels();
+}
 
 async function loadEntities() {
   const { data } = await supabase.from('network_entities').select('id, legal_name').order('legal_name');
@@ -158,7 +170,7 @@ document.getElementById('rel-form').addEventListener('submit', async e => {
   loadRels();
 });
 
-loadEntities(); loadDomains(); loadRels();
+init();
 </script>
 </body>
 </html>

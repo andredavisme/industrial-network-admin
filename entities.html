@@ -16,6 +16,8 @@
   <a href="products.html">Products</a>
   <a href="terms.html">Terms</a>
   <a href="portals.html">Portals</a>
+  <span style="flex:1"></span>
+  <button class="secondary" id="signout-btn" style="display:none;font-size:0.8rem;padding:0.4rem 0.9rem;align-self:center">Sign Out</button>
 </nav>
 
 <main>
@@ -80,11 +82,22 @@
 </main>
 
 <script type="module">
-import { supabase } from './supabase.js';
+import { supabase, requireAuth } from './supabase.js';
 
 const ROLE_BADGE = { manufacturer: 'badge-blue', distributor: 'badge-amber', consumer: 'badge-green', user_org: 'badge-purple' };
 
 let domains = [];
+
+async function init() {
+  await requireAuth();
+  document.getElementById('signout-btn').style.display = 'flex';
+  document.getElementById('signout-btn').addEventListener('click', async () => {
+    await supabase.auth.signOut();
+    location.reload();
+  });
+  loadDomains();
+  loadEntities();
+}
 
 async function loadDomains() {
   const { data } = await supabase.from('domains').select('id, name, parent_id').not('parent_id', 'is', null).order('sort_order');
@@ -144,7 +157,6 @@ document.getElementById('entity-form').addEventListener('submit', async e => {
   const { data, error } = await supabase.from('network_entities').insert(payload).select('id').single();
   if (error) { msg.className = 'msg error'; msg.textContent = error.message; return; }
 
-  // Link industries
   if (selectedIndustries.length && data?.id) {
     await supabase.from('network_entity_industries').insert(
       selectedIndustries.map((domain_id, i) => ({ entity_id: data.id, domain_id, is_primary: i === 0 }))
@@ -156,13 +168,11 @@ document.getElementById('entity-form').addEventListener('submit', async e => {
   loadEntities();
 });
 
-// Auto-generate slug from legal name
 document.getElementById('legal_name').addEventListener('input', e => {
   document.getElementById('slug').value = e.target.value.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
 });
 
-loadDomains();
-loadEntities();
+init();
 </script>
 </body>
 </html>
